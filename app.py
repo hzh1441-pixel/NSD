@@ -14,7 +14,7 @@ PHOTO_FACTS = {
     "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
-# 2. 인프라 설정
+# 2. 시스템 인프라 설정
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -24,64 +24,68 @@ CHAT_ID = "8182795005"
 
 st.set_page_config(page_title="NSD PRO", layout="wide")
 
-# --- [영구 저장 로직] 앱을 꺼도 사라지지 않는 핵심 장치 ---
-def get_user_config():
-    """앱 시작 시 DB에서 사용자 설정을 무조건 불러옴"""
+# --- [영구 저장 로직] 앱이 켜질 때 DB에서 마지막 기록을 강제로 가져옴 ---
+@st.cache_data(ttl=5) # 짧은 캐시로 DB 부하 방지 및 최신화
+def fetch_saved_config():
     try:
-        res = supabase.table("user_config").select("*").eq("id", 1).execute()
-        return res.data[0] if res.data else {"watchlist": "", "alert_enabled": True}
-    except Exception:
-        return {"watchlist": "", "alert_enabled": True}
+        res = supabase.table("user_config").select("watchlist, alert_enabled").eq("id", 1).execute()
+        if res.data:
+            return res.data[0]
+    except:
+        pass
+    return {"watchlist": "", "alert_enabled": True}
 
-def save_user_config(watchlist, alert_enabled):
-    """변경 즉시 DB에 저장하여 영구 박제"""
+# 초기화 로직: 앱이 켜지자마자 실행
+saved_data = fetch_saved_config()
+if 'user_watchlist' not in st.session_state:
+    st.session_state.user_watchlist = saved_data['watchlist']
+if 'alert_on' not in st.session_state:
+    st.session_state.alert_on = saved_data['alert_enabled']
+
+def update_config():
+    """사용자가 입력값을 바꾸는 즉시 DB에 영구 저장"""
     try:
         supabase.table("user_config").upsert({
-            "id": 1, 
-            "watchlist": watchlist, 
-            "alert_enabled": alert_enabled
+            "id": 1,
+            "watchlist": st.session_state.new_watchlist,
+            "alert_enabled": st.session_state.new_alert_on
         }).execute()
-    except Exception:
+        st.session_state.user_watchlist = st.session_state.new_watchlist
+        st.session_state.alert_on = st.session_state.new_alert_on
+    except:
         pass
 
-# 앱 구동 즉시 DB 데이터 로드 (폰 재부팅 대응)
-if 'init' not in st.session_state:
-    config = get_user_config()
-    st.session_state.user_watchlist = config['watchlist']
-    st.session_state.alert_on = config['alert_enabled']
-    st.session_state.init = True
+st.title("🛡️ Reg sho 등재 목록")
 
-# --- UI 상단: 24시간 감시 센터 ---
-st.title("승현쓰껄ㅋ")
-
-with st.expander("🔔 실시간 알림 및 감시 종목 설정", expanded=True):
-    alert_on = st.toggle("텔레그램 알림 활성화", value=st.session_state.alert_on)
+# --- UI 상단: 24시간 실시간 감시 설정 ---
+with st.expander("🔔 24시간 공시 감시 설정 (앱을 꺼도 유지됨)", expanded=True):
+    # 알림 스위치와 티커 입력창을 DB 값과 동기화
+    alert_on = st.toggle(
+        "텔레그램 알림 활성화", 
+        value=st.session_state.alert_on, 
+        key="new_alert_on", 
+        on_change=update_config
+    )
     
     watch_input = st.text_input(
         "감시 티커 입력 (쉼표 구분)", 
-        value=st.session_state.user_watchlist,
+        value=st.session_state.user_watchlist, 
+        key="new_watchlist", 
+        on_change=update_config,
         placeholder="예: BNAI, TSLA"
     ).upper()
-    
-    # 변경 사항 감지 시 즉시 저장
-    if (watch_input != st.session_state.user_watchlist) or (alert_on != st.session_state.alert_on):
-        st.session_state.user_watchlist = watch_input
-        st.session_state.alert_on = alert_on
-        save_user_config(watch_input, alert_on)
 
     col1, col2 = st.columns([4, 1])
     with col1:
-        if watch_input:
-            st.success(f"🛰️ 24시간 감시 중: {watch_input}")
+        if st.session_state.user_watchlist:
+            st.success(f"🛰️ 현재 서버 감시 중: {st.session_state.user_watchlist}")
     with col2:
-        # [복구] 테스트 알림 버튼 (오타 수리 완료)
         if st.button("🚀 테스트 발송"):
-            msg = f"✅ NSD PRO: 연결 상태 정상\n현재 감시 중: {watch_input}"
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                          data={"chat_id": CHAT_ID, "text": msg})
-            st.toast("테스트 발송 완료")
+                          data={"chat_id": CHAT_ID, "text": f"✅ 연결 및 영구 저장 정상\n감시 목록: {st.session_state.user_watchlist}"})
+            st.toast("테스트 성공!")
 
-# 3. 데이터 엔진 (순서 100% 보존: 등재일 > 로고 > 티커 > 종목명)
+# 3. 데이터 엔진 (로직 및 순서 100% 보존: 등재일 > 로고 > 티커 > 종목명)
 def get_verified_data():
     try:
         res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
@@ -91,8 +95,8 @@ def get_verified_data():
         latest_date = df['recorded_date'].max()
         
         extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
-        
         current_market = df[df['recorded_date'] == latest_date]
+        
         final_rows = []
         for _, row in current_market.iterrows():
             sym, name = row['symbol'], row['security_name'].upper()
@@ -100,7 +104,7 @@ def get_verified_data():
             
             days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
             
-            # 🔥 [UI 순서 고정] 등재일 > 로고 > 티커 > 종목명
+            # 🔥 [UI 순서 절대 고정] 등재일 > 로고 > 티커 > 종목명
             final_rows.append({
                 "등재일": days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
@@ -108,15 +112,20 @@ def get_verified_data():
                 "종목명": name
             })
         return pd.DataFrame(final_rows)
-    except Exception:
-        return None
+    except: return None
 
+# 데이터 출력 영역
 active_df = get_verified_data()
-if active_df is not None:
-    st.dataframe(active_df.sort_values(by="등재일", ascending=False),
+search = st.text_input("🔍 목록 내 검색", "").upper()
+
+if active_df is not None and not active_df.empty:
+    if search: active_df = active_df[active_df['티커'].str.contains(search)]
+    st.dataframe(
+        active_df.sort_values(by="등재일", ascending=False),
         column_config={
             "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
             "로고": st.column_config.ImageColumn("", width="small"),
             "티커": st.column_config.TextColumn("티커"),
             "종목명": st.column_config.TextColumn("종목명")
-        }, use_container_width=True, hide_index=True)
+        }, use_container_width=True, hide_index=True
+    )
