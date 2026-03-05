@@ -55,7 +55,7 @@ def run_pure_engine():
     return pd.DataFrame(final_rows)
 
 # --- UI ---
-st.title("🛡️ Reg SHO 실증 데이터 통합 (오류 수정본)")
+st.title("🛡️ Reg SHO 등재 목록")
 search = st.text_input("🔍 티커 검색", "").upper()
 active_df = run_pure_engine()
 
