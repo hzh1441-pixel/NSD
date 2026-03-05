@@ -14,62 +14,41 @@ PHOTO_FACTS = {
     "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
-# --- 인프라 설정 ---
+# 2. 시스템 인프라 설정
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
-CHAT_ID = "8182795005"
+st.set_page_config(page_title="NSD PRO", layout="wide")
 
-st.set_page_config(page_title="Reg sho 등재 목록", layout="wide")
-
-# --- [신규] 감시 목록 영구 저장 로직 ---
+# --- 감시 목록 영구 저장 로직 ---
 def load_watchlist():
-    """DB에서 저장된 감시 목록 불러오기"""
     try:
         res = supabase.table("user_config").select("watchlist").eq("id", 1).execute()
         return res.data[0]['watchlist'] if res.data else ""
-    except:
-        return ""
+    except Exception: return ""
 
 def save_watchlist(new_list):
-    """DB에 감시 목록 저장하기"""
     try:
         supabase.table("user_config").upsert({"id": 1, "watchlist": new_list}).execute()
-    except:
-        pass
+    except Exception: pass
 
-# 초기 로딩 시 DB에서 불러오기
 if 'user_watchlist' not in st.session_state:
     st.session_state.user_watchlist = load_watchlist()
 
-# --- UI 상단: 감시 센터 ---
+# --- UI 레이아웃 ---
 st.title("승현쓰껄ㅋ")
 
 with st.expander("🔔 실시간 SEC 공시 감시 설정 (영구 저장)", expanded=True):
     alert_on = st.toggle("텔레그램 알림 활성화", value=True)
-    
-    # 입력 시 즉시 DB에 저장하도록 on_change 설정
-    watch_input = st.text_input(
-        "감시 티커 입력 (쉼표 구분)", 
-        value=st.session_state.user_watchlist,
-        placeholder="예: BNAI, TSLA"
-    ).upper()
+    watch_input = st.text_input("감시 티커 입력 (쉼표 구분)", value=st.session_state.user_watchlist).upper()
     
     if watch_input != st.session_state.user_watchlist:
         st.session_state.user_watchlist = watch_input
-        save_watchlist(watch_input) # 변경 즉시 DB 저장
+        save_watchlist(watch_input)
     
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        if watch_input:
-            st.success(f"🛰️ 영구 감시 중: {watch_input}")
-    with col2:
-        if st.button("🚀 테스트 발송"):
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            requests.post(url, data={"chat_id": CHAT_ID, "text": "✅ 영구 저장 및 알림 연동 테스트 성공"})
-            st.toast("전송 완료!")
+    if watch_input:
+        st.success(f"🛰️ 영구 감시 중: {watch_input}")
 
 # 3. 데이터 엔진 (로직 및 순서 100% 보존)
 def get_verified_data():
@@ -87,19 +66,20 @@ def get_verified_data():
             sym, name = row['symbol'], row['security_name'].upper()
             if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): continue
             
-            display_days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
+            # 절대값 보존
+            days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
             
-            # 🔥 [UI 순서 절대 고정] 등재일 > 로고 > 티커 > 종목명
+            # 🔥 [UI 순서 고정] 등재일 > 로고 > 티커 > 종목명
             final_rows.append({
-                "등재일": display_days,
+                "등재일": days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
                 "티커": sym,
                 "종목명": name
             })
         return pd.DataFrame(final_rows)
-    except Exception:
-        return None
+    except Exception: return None
 
+# 데이터 출력
 active_df = get_verified_data()
 search = st.text_input("🔍 목록 내 검색", "").upper()
 
