@@ -24,81 +24,63 @@ CHAT_ID = "8182795005"
 
 st.set_page_config(page_title="NSD PRO", layout="wide")
 
-# --- [수리 완료] 영구 저장 및 동기화 엔진 ---
-def fetch_config_from_db():
+# --- [완벽 수리] 영구 저장 및 동기화 엔진 ---
+def load_db_config():
+    """DB에서 데이터를 가져오는 함수 (에러 발생 시 빈값 반환)"""
     try:
-        res = supabase.table("user_config").select("watchlist, alert_enabled").eq("id", 1).execute()
+        res = supabase.table("user_config").select("*").eq("id", 1).execute()
         if res.data:
-            return res.data[0]
+            return res.data[0]['watchlist'], res.data[0]['alert_enabled']
     except Exception:
         pass
-    return {"watchlist": "", "alert_enabled": True}
+    return "", True
 
-# 초기 로딩 시 DB에서 데이터를 가져와 세션에 박제 (재부팅 시 유지의 핵심)
+# [핵심] 앱 구동 시 최초 1회만 DB에서 읽어와 위젯의 'key' 이름으로 세션에 저장
 if 'initialized' not in st.session_state:
-    db_data = fetch_config_from_db()
-    st.session_state['user_watchlist'] = db_data['watchlist']
-    st.session_state['alert_on'] = db_data['alert_enabled']
+    db_watch, db_alert = load_db_config()
+    st.session_state['input_watchlist'] = db_watch
+    st.session_state['input_alert'] = db_alert
     st.session_state['initialized'] = True
 
-def sync_to_db():
-    """입력 즉시 DB에 저장하여 앱 종료 시에도 보존"""
-    # [수리] 따옴표 및 괄호 누락 방지 정밀 설계
-    current_watchlist = st.session_state.new_watchlist.upper()
-    current_alert = st.session_state.new_alert_on
+def save_to_db():
+    """위젯에서 엔터키나 클릭이 발생할 때 즉시 DB로 쏘는 콜백 함수"""
+    new_watch = st.session_state['input_watchlist'].upper()
+    new_alert = st.session_state['input_alert']
     try:
         supabase.table("user_config").upsert({
             "id": 1,
-            "watchlist": current_watchlist,
-            "alert_enabled": current_alert
+            "watchlist": new_watch,
+            "alert_enabled": new_alert
         }).execute()
-        st.session_state['user_watchlist'] = current_watchlist
-        st.session_state['alert_on'] = current_alert
-        st.toast("✅ 설정이 안전하게 저장되었습니다.")
+        st.toast("✅ 설정이 서버에 영구 저장되었습니다.")
     except Exception:
-        st.error("⚠️ 저장 실패 (DB 확인 필요)")
+        st.error("❌ 저장 실패: DB 연결 상태를 확인하세요.")
 
 st.title("🛡️ Reg sho 등재 목록")
 
-# --- UI 상단: 24시간 실시간 감시 설정 (테스트 버튼 수리 완료) ---
-with st.expander("🔔 24시간 공시 감시 설정 (앱을 꺼도 유지됨)", expanded=True):
-    # [수리] image_4ed244.png의 '(' was never closed 에러 해결
+# --- UI 상단: 24시간 실시간 감시 설정 ---
+with st.expander("🔔 실시간 알림 및 감시 종목 설정 (영구 저장)", expanded=True):
+    # [버그 해결] value 속성을 완전히 제거하고 key만 사용하여 충돌 원천 차단
     st.toggle(
-        "텔레그램 알림 활성화", 
-        value=st.session_state['alert_on'], 
-        key="new_alert_on", 
-        on_change=sync_to_db
+        "텔레그램 알림 활성화",
+        key="input_alert",
+        on_change=save_to_db
     )
     
     st.text_input(
-        "감시 티커 입력 (엔터를 치면 영구 저장됩니다)", 
-        value=st.session_state['user_watchlist'], 
-        key="new_watchlist", 
-        on_change=sync_to_db,
+        "감시 티커 입력 (쉼표 구분 후 엔터)",
+        key="input_watchlist",
+        on_change=save_to_db,
         placeholder="예: BNAI, TSLA"
     )
 
     col1, col2 = st.columns([4, 1])
     with col1:
-        if st.session_state['user_watchlist']:
-            st.info(f"🛰️ 현재 서버 감시 중: {st.session_state['user_watchlist']}")
+        if st.session_state['input_watchlist']:
+            st.success(f"🛰️ 현재 서버 감시 중: {st.session_state['input_watchlist']}")
     with col2:
-        # [수리] image_4ece4c.png 및 image_4ecb3c.png의 따옴표 에러 해결
         if st.button("🚀 테스트 발송"):
-            test_msg = f"✅ NSD PRO: 연결 정상\n감시 목록: {st.session_state['user_watchlist']}"
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                          data={"chat_id": CHAT_ID, "text": test_msg})
-            st.toast("테스트 성공!")
-
-# 3. 데이터 엔진 (순서 100% 보존: 등재일 > 로고 > 티커 > 종목명)
-def get_verified_data():
-    try:
-        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
-        if not res.data: return None
-        df = pd.DataFrame(res.data)
-        df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
-        latest_date = df['recorded_date'].max()
-        
-        # 3/4 이후 실제 데이터 기반 추가 날짜 산출 (image_4ed2de.png 에러 해결)
-        extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
-        current_market = df
+            try:
+                msg = f"✅ NSD PRO: 연동 정상\n감시 목록: {st.session_state['input_watchlist']}"
+                requests.post(
+                    f"https://api.
