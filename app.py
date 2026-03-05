@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from supabase import create_client
 
-# 1. [성역] 사진 실증 마스터 데이터 (수정 절대 금지)
+# 1. [절대값 Sanctuary] 사진 실증 데이터 (수정 절대 금지)
 PHOTO_FACTS = {
     "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
     "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12,
@@ -13,30 +13,46 @@ PHOTO_FACTS = {
     "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
-# 2. 인프라 설정
+# 2. 시스템 인프라 설정
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="NSD PRO", layout="wide")
+st.set_page_config(page_title="Reg sho 등재 목록", layout="wide")
 
-# --- UI 상단: SEC 공시 알림 설정 (상태 보존형) ---
-st.title("승현쓰껄^0^ㅋ")
+# 로고 도메인 매핑 (로고 누락 방지)
+DOMAIN_MAP = {"BNAI": "beninc.ai", "AREB": "americanrebel.com", "VEEE": "veea.com", "RVSN": "railvision.io"}
 
-# [알림 설정] 초기화 방지를 위해 session_state 활용
-if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = "BNAI" # 초기 1회만 설정
+def get_logo_url(ticker):
+    domain = DOMAIN_MAP.get(ticker, f"{ticker}.com")
+    return f"https://www.google.com/s2/favicons?sz=128&domain={domain}"
 
-with st.expander("🔔 모바일 실시간 푸시 알림 설정", expanded=True):
-    alert_on = st.toggle("알림 스위치 (ON/OFF)", value=True)
-    # 기본값 고정 현상 해결: 사용자 입력값을 즉시 반영
-    watch_input = st.text_input("감시 티커 입력 (예: BNAI, TSLA)", value=st.session_state.watchlist).upper()
-    st.session_state.watchlist = watch_input
+# --- UI 상단: SEC 공시 알림 설정 (입력값 기억 로직 탑재) ---
+st.title("승현쓰껄ㅋ")
+
+# [핵심 수리] 사용자 입력값을 기억하기 위한 기억 장치(session_state) 초기화
+if 'user_watchlist' not in st.session_state:
+    st.session_state.user_watchlist = "" # 처음에는 비워둡니다.
+
+with st.expander("🔔 모바일 실시간 SEC 공시 알림 설정", expanded=True):
+    alert_on = st.toggle("알림 활성화 (ON/OFF)", value=True)
     
-    if alert_on:
-        st.info(f"📢 서버 감시병이 '{watch_input}' 종목을 24시간 감시합니다. 창을 닫아도 알림이 전송됩니다.")
+    # [수정] value를 session_state와 연결하여 입력값이 초기화되지 않게 함
+    watch_input = st.text_input(
+        "감시할 티커 입력 (쉼표 구분)", 
+        value=st.session_state.user_watchlist,
+        placeholder="예: BNAI, TSLA, AAPL"
+    ).upper()
+    
+    # 입력한 값을 즉시 기억 장치에 저장
+    st.session_state.user_watchlist = watch_input
+    
+    if alert_on and watch_input:
+        st.success(f"✅ 현재 '{watch_input}' 종목을 24시간 감시 중입니다. (문자 방식 알림)")
+    elif alert_on and not watch_input:
+        st.warning("감시할 티커를 입력해주세요.")
 
-# 3. 데이터 엔진 (로직 및 순서 고정)
+# 3. 데이터 엔진 (로직 및 순서 100% 보존)
 def get_verified_data():
     try:
         res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
@@ -58,17 +74,17 @@ def get_verified_data():
             # 🔥 [UI 순서 고정] 등재일 > 로고 > 티커 > 종목명
             final_rows.append({
                 "등재일": display_days,
-                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                "로고": get_logo_url(sym),
                 "티커": sym,
                 "종목명": name
             })
         return pd.DataFrame(final_rows)
     except: return None
 
+# 데이터 출력
 active_df = get_verified_data()
-
-# --- 하단 리스트 출력 ---
 search = st.text_input("🔍 목록 내 검색", "").upper()
+
 if active_df is not None and not active_df.empty:
     if search: active_df = active_df[active_df['티커'].str.contains(search)]
     st.dataframe(
