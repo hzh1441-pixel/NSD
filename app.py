@@ -83,7 +83,7 @@ with st.expander("🔔 24시간 공시 감시 설정 (앱을 꺼도 유지됨)",
         if st.session_state['user_watchlist']:
             st.info(f"🛰️ 현재 서버 감시 중: {st.session_state['user_watchlist']}")
     with col2:
-        # [수리] image_fa844.png의 unterminated string literal 에러 해결
+        # [수리] image_4ece4c.png 및 image_4ecb3c.png의 따옴표 에러 해결
         if st.button("🚀 테스트 발송"):
             test_msg = f"✅ NSD PRO: 연결 정상\n감시 목록: {st.session_state['user_watchlist']}"
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
@@ -99,6 +99,6 @@ def get_verified_data():
         df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
         latest_date = df['recorded_date'].max()
         
-        # 3/4 이후 실제 데이터 기반 추가 날짜 산출 (image_4f5622.png 에러 해결)
+        # 3/4 이후 실제 데이터 기반 추가 날짜 산출 (image_4ed2de.png 에러 해결)
         extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
-        current_market = df[df['recorded
+        current_market = df
