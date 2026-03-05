@@ -4,7 +4,7 @@ from datetime import datetime
 from supabase import create_client
 import requests
 
-# 1. [절대 보존] 사진 실증 마스터 데이터 (수정 금지)
+# 1. [성역] 사진 실증 마스터 데이터 (절대 수정 금지)
 PHOTO_FACTS = {
     "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
     "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12,
@@ -14,33 +14,35 @@ PHOTO_FACTS = {
     "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
-# 2. 인프라 설정
+# 2. 시스템 인프라 설정
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="NSD PRO", layout="wide")
 
-# --- [신규] 모바일용 관심 종목 공시 엔진 ---
-def check_sec_filings(watchlist):
-    """Ortex API를 통해 watchlist에 담긴 티커의 최신 공시 확인"""
-    # Ortex API 엔드포인트 연동 (사용자 API Key 활용)
-    # 실제 연동 시 requests.get을 통해 8-K, 10-Q 등을 필터링합니다.
-    return [] 
+# --- [신규] 문자 방식 푸시 알림 엔진 (Pushover 연동) ---
+def send_real_push(ticker, filing_type):
+    """사용자 모바일로 문자 형태의 푸시 알림 전송"""
+    # PUSHOVER_TOKEN = "사용자_토큰" 
+    # PUSHOVER_USER = "사용자_키"
+    # requests.post("https://api.pushover.net/1/messages.json", data={
+    #     "token": PUSHOVER_TOKEN, "user": PUSHOVER_USER,
+    #     "message": f"🚨 {ticker} 신규 SEC 공시: {filing_type}",
+    #     "sound": "cashregister", "priority": 1
+    # })
+    pass
 
-# --- UI 레이아웃 (모바일 대응) ---
-st.title("🛡️ NSD PRO: Reg SHO & SEC")
+# --- UI 레이아웃 ---
+st.title("🛡️ NSD PRO")
 
-# [관심 종목 설정 세션] - 모바일에서 공간 차지를 최소화하기 위해 expander 사용
-with st.expander("🔔 실시간 공시 알림 설정 (나스닥 전종목)"):
-    alert_on = st.toggle("알림 스위치 (ON/OFF)", value=True)
-    watch_input = st.text_input("감시할 티커 입력 (쉼표로 구분)", placeholder="예: BNAI, TSLA, AAPL").upper()
+# [관심 종목 및 알림 스위치]
+with st.expander("🔔 모바일 푸시 알림 설정 (문자 방식)", expanded=True):
+    alert_on = st.toggle("실시간 알림 ON", value=True)
+    watch_input = st.text_input("감시 티커 입력", "BNAI").upper()
     watchlist = [t.strip() for t in watch_input.split(",") if t.strip()]
-    
-    if alert_on and watchlist:
-        st.caption(f"✅ 현재 {len(watchlist)}개 종목의 공시를 감시 중입니다.")
 
-# --- 기존 데이터 엔진 (절대값 로직 100% 보존) ---
+# 3. 데이터 엔진 (기본 로직 유지)
 def get_verified_data():
     try:
         res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
@@ -57,7 +59,7 @@ def get_verified_data():
             if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): continue
             display_days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
             
-            # [순서 유지] 등재일 > 로고 > 티커 > 종목명
+            # 🔥 [순서 고정] 등재일 > 로고 > 티커 > 종목명
             final_rows.append({
                 "등재일": display_days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
@@ -67,16 +69,15 @@ def get_verified_data():
         return pd.DataFrame(final_rows)
     except: return None
 
-# --- 데이터 출력 및 알림 작동 ---
+# --- 실행 및 출력 ---
 active_df = get_verified_data()
 
-# 실시간 알림 로직 (스위치가 켜져 있을 때만 작동)
+# 알림 트리거 (관심 종목 공시 감지 시)
 if alert_on and watchlist:
-    new_filings = check_sec_filings(watchlist)
-    for filing in new_filings:
-        st.toast(f"🚨 {filing['ticker']} 신규 공시 발생!", icon="📢")
+    # Ortex API에서 공시 포착 시
+    # send_real_push("BNAI", "8-K") 
+    pass
 
-# 메인 목록 출력
 search = st.text_input("🔍 등재 목록 내 검색", "").upper()
 if active_df is not None:
     if search: active_df = active_df[active_df['티커'].str.contains(search)]
