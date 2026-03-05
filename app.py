@@ -1,83 +1,75 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from supabase import create_client
 
-# 1. 인프라 설정
+# 1. 사진 팩트 (기준: 2026-03-04)
+PHOTO_FACTS = {
+    "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
+    "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12,
+    "BRTX": 10, "NCI": 10, "HBR": 9, "NVDL": 9, "RIME": 9, "LFS": 8, "LGHL": 8, "PDC": 8,
+    "XTKG": 7, "CDIO": 6, "DYTA": 5, "GGLS": 5, "GV": 5, "MGRX": 5, "PFSA": 5, "RUBI": 5,
+    "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "HIMZ": 2, "IONZ": 2
+}
+
+# 인프라 설정
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 페이지 설정 (전체 화면 최적화)
-st.set_page_config(page_title="NSD PRO: FACT TRACKER", layout="wide")
+st.set_page_config(page_title="NSD PRO: TOTAL TRACKER", layout="wide")
 
-# 로고 가져오기 함수
-def get_logo(ticker):
-    return f"https://www.google.com/s2/favicons?sz=64&domain={ticker}.com"
-
-# --- 사이드바: 심플하게 유지 ---
-with st.sidebar:
-    st.title("🛡️ NSD PRO")
-    st.divider()
-    st.markdown("### 📊 시스템 상태")
-    st.success("실시간 데이터 동기화 중")
-    st.info("현재 DB 기록 기반으로 등재일을 산출합니다.")
-
-# --- 메인 화면 ---
-st.header("📋 Reg SHO 실증 데이터 추적기")
-
-# 2. 데이터 불러오기
+# --- 데이터 통합 처리 ---
 res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
 
 if res.data:
     df = pd.DataFrame(res.data)
     df['recorded_date'] = pd.to_datetime(df['recorded_date'])
-    
-    # 시스템 기록 총 일수 파악
-    total_system_days = len(df['recorded_date'].unique())
     latest_date = df['recorded_date'].max()
-    current_list = df[df['recorded_date'] == latest_date]['symbol'].unique()
+    
+    # [팩트 체크 환경]
+    current_market_list = set(df[df['recorded_date'] == latest_date]['symbol'].unique())
+    days_passed = (datetime.now().date() - datetime(2026, 3, 4).date()).days
     
     final_rows = []
-    for sym in current_list:
-        # DB 내 순수 누적 일수 계산
-        streak = len(df[df['symbol'] == sym])
+
+    for sym in current_market_list:
         name = df[df['symbol'] == sym]['security_name'].iloc[0]
         
+        # A. 사진 팩트 종목 (절대값 우선)
+        if sym in PHOTO_FACTS:
+            actual_days = PHOTO_FACTS[sym] + days_passed
+            tag = "✅ 실증(사진)"
+        else:
+            # B. 기존 DB 추적 종목 vs C. 신규 진입 종목 판별
+            db_count = len(df[df['symbol'] == sym])
+            actual_days = db_count
+            
+            if db_count == 1:
+                tag = "✨ 신규 진입" # 오늘 처음 발견됨
+            else:
+                tag = "⏳ DB 추적 중"
+
         final_rows.append({
-            "로고": get_logo(sym),
             "티커": sym,
             "종목명": name,
-            "등재일": streak,
-            "검증": "✅ 실증" if streak < total_system_days else "⏳ 추적중"
+            "누적 등재일": actual_days,
+            "구분": tag
         })
-    
-    # 랭킹 데이터프레임 생성
-    ranking_df = pd.DataFrame(final_rows)
-    
-    # 기본 정렬: 등재일 높은 순
-    ranking_df = ranking_df.sort_values(by="등재일", ascending=False)
 
-    # --- UI 출력 (가장 깔끔했던 버전으로 복구) ---
-    st.divider()
+    # --- UI 출력 ---
+    st.title("🛡️ Reg SHO 통합 실증 시스템")
     
-    # 표 상단 필터 및 정렬 안내
-    st.caption("💡 각 열의 제목을 클릭하면 티커순, 등재일순으로 정렬할 수 있습니다.")
+    # 1. 전체 등재 리스트 (정렬 가능)
+    st.subheader("📊 현재 등재 종목 (실시간 팩트 반영)")
+    ranking_df = pd.DataFrame(final_rows).sort_values(by="누적 등재일", ascending=False)
+    st.dataframe(ranking_df, use_container_width=True, hide_index=True)
     
-    st.dataframe(
-        ranking_df,
-        column_config={
-            "로고": st.column_config.ImageColumn(""),
-            "티커": st.column_config.TextColumn("티커", width="small"),
-            "종목명": st.column_config.TextColumn("종목명", width="medium"),
-            "등재일": st.column_config.NumberColumn("누적 등재일 (팩트)", format="%d 일"),
-            "검증": st.column_config.TextColumn("상태")
-        },
-        use_container_width=True,
-        hide_index=True
-    )
+    # 2. 신규 진입 종목만 따로 추출해서 보여주기
+    new_entries = [row for row in final_rows if row["구분"] == "✨ 신규 진입"]
+    if new_entries:
+        st.toast(f"오늘 {len(new_entries)}개의 신규 종목이 등재되었습니다!")
+        with st.expander("🆕 오늘의 신규 진입 종목 확인"):
+            st.table(pd.DataFrame(new_entries)[["티커", "종목명"]])
 
-    # 하단 정보 요약
-    st.divider()
-    st.write(f"현재 시스템 누적 기록: **{total_system_days}일**")
-else:
-    st.warning("데이터베이스 연결을 확인 중입니다...")
+    st.info(f"💡 사진 팩트 기반 합산과 신규 진입 탐지가 동시에 가동 중입니다. (BNAI: {PHOTO_FACTS['BNAI']+days_passed}일)")
