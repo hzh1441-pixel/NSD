@@ -20,7 +20,7 @@ SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # UI 제목 설정
-st.set_page_config(page_title="Reg sho 등재 목록", layout="wide")
+st.set_page_config(page_title="승현쓰껄 ^0^", layout="wide")
 
 # 로고 도메인 매핑
 DOMAIN_MAP = {"BNAI": "beninc.ai", "AREB": "americanrebel.com", "VEEE": "veea.com", "RVSN": "railvision.io"}
