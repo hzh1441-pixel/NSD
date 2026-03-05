@@ -14,38 +14,45 @@ PHOTO_FACTS = {
     "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
-# --- [수정 완료] 텔레그램 설정 ---
+# --- 텔레그램 설정 (사용자 정보 반영 완료) ---
 TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
 def send_telegram_msg(ticker, form_type, headline):
-    """실제로 텔레그램 팝업 문자를 쏘는 함수"""
+    """텔레그램으로 즉시 문자를 쏘는 핵심 엔진"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     text = f"🚨 [{ticker}] 신규 SEC 공시 포착!\n\n📌 종류: {form_type}\n📄 내용: {headline}\n⏰ 시간: {datetime.now().strftime('%H:%M:%S')}"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+        response = requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+        return response.status_code == 200
     except:
-        pass
+        return False
 
 # --- 시스템 인프라 설정 ---
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="승현쓰껄ㅋ", layout="wide")
+st.set_page_config(page_title="NSD PRO", layout="wide")
 st.title("승현쓰껄ㅋ")
 
 # [입력값 기억 로직]
 if 'user_watchlist' not in st.session_state:
     st.session_state.user_watchlist = ""
 
-with st.expander("🔔 텔레그램 실시간 공시 알림 설정", expanded=True):
-    alert_on = st.toggle("텔레그램 알림 ON/OFF", value=True)
-    watch_input = st.text_input("감시 티커 (쉼표 구분)", value=st.session_state.user_watchlist).upper()
-    st.session_state.user_watchlist = watch_input
-    
-    if alert_on and watch_input:
-        st.success(f"✅ 텔레그램으로 '{watch_input}' 공시를 즉시 발송합니다.")
+# --- 상단: 알림 제어 센터 ---
+with st.expander("🔔 텔레그램 알림 제어 및 테스트", expanded=True):
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        alert_on = st.toggle("알림 활성화 (ON/OFF)", value=True)
+        watch_input = st.text_input("감시 티커 (예: BNAI, TSLA)", value=st.session_state.user_watchlist).upper()
+        st.session_state.user_watchlist = watch_input
+    with col2:
+        st.write("") # 간격 맞춤
+        if st.button("🚀 테스트 알림 발송"):
+            success = send_telegram_msg("BNAI", "TEST", "시스템 연동 테스트 성공! (등재일 데이터 보존 완료)")
+            if success: st.success("알림 전송됨!")
+            else: st.error("전송 실패 (토큰 확인 필요)")
 
 # 3. 데이터 엔진 (로직 및 순서 고정)
 def get_verified_data():
