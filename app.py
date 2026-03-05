@@ -3,73 +3,76 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 
-# 1. 페이지 설정 및 제목
+# 1. 페이지 설정
 st.set_page_config(page_title="NSD REG SHO", layout="wide")
-st.title("📊 NSD REG SHO")
+st.title("📊 NSD REG SHO (실시간 트래커)")
 
-# 2. 개별 날짜의 데이터를 가져오는 함수
-@st.cache_data(ttl=3600)
-def get_data_for_date(target_date):
+# 2. 데이터 수집 핵심 함수
+def get_reg_sho_list(target_date):
     url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{target_date}.txt"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200 and "Symbol" in response.text:
-            df = pd.read_csv(url, sep='|')[:-1]
+            df = pd.read_csv(url, sep='|')[:-1] # 마지막 요약줄 제거
             df.columns = df.columns.str.strip()
-            return set(df['Symbol'].tolist()) # 검색 속도를 위해 세트(set)로 반환
+            return df
     except:
         pass
     return None
 
-# 3. 연속 등재 일수를 계산하는 핵심 로직
-def calculate_consecutive_days(symbol):
-    count = 0
-    current_date = datetime.now()
-    found_any = False
-    
-    # 최근 30일간의 데이터를 역순으로 확인
-    for i in range(30):
-        check_date = (current_date - timedelta(days=i)).strftime('%Y%m%d')
-        symbols_on_list = get_data_for_date(check_date)
-        
-        if symbols_on_list is not None:
-            if symbol in symbols_on_list:
-                count += 1
-                found_any = True
-            else:
-                # 리스트에 없는 날이 발견되면 카운트 중단 (연속성 끊김)
-                if found_any: break
-        else:
-            # 주말이나 휴장일로 데이터가 없는 경우는 건너뜀 (연속성 유지)
-            continue
-            
-    return count
-
-# 4. 화면 구성 (검색 및 결과)
-symbol_input = st.text_input("🔍 종목 심볼 입력 (예: BNAI, SMCI)", "").upper()
+# 3. 연속 일수 및 최신 데이터 확인 로직
+st.subheader("🔎 종목 정밀 분석")
+symbol_input = st.text_input("심볼을 입력하세요 (예: BNAI)", "").upper()
 
 if symbol_input:
-    with st.spinner(f'{symbol_input}의 등재 일수를 나스닥 공식 기록에서 대조 중...'):
-        days = calculate_consecutive_days(symbol_input)
+    progress_text = st.empty()
+    days_count = 0
+    found_dates = []
+    
+    # 최근 30일간을 역순으로 훑으며 '연속성' 계산
+    for i in range(30):
+        check_date = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+        progress_text.text(f"⏳ {check_date} 나스닥 공식 기록 대조 중...")
         
-        if days > 0:
-            st.error(f"### 🚨 {symbol_input} : 현재 {days}일 연속 등재 중")
-            if days >= 13:
-                st.warning("⚠️ **주의:** 13거래일 이상 등재되었습니다. 규정에 따른 강제 청산(Rule 203(b)(3)) 대상인지 확인이 필요합니다.")
+        df = get_reg_sho_list(check_date)
+        
+        if df is not None:
+            if symbol_input in df['Symbol'].values:
+                days_count += 1
+                found_dates.append(check_date)
+            else:
+                # 리스트에 없는 날이 나오면 연속성이 끊긴 것이므로 중단
+                if days_count > 0: break
         else:
-            st.success(f"### ✅ {symbol_input} : 현재 리스트에 없습니다.")
+            # 주말/휴장일로 파일이 없는 경우는 무시하고 계속 진행 (연속성 유지)
+            continue
+            
+    progress_text.empty() # 진행 메시지 삭제
+
+    if days_count > 0:
+        st.error(f"### 🚨 {symbol_input} : 현재 {days_count}일 연속 등재 중")
+        with st.expander("상세 등재 날짜 보기"):
+            st.write(", ".join(found_dates))
+        if days_count >= 13:
+            st.warning("⚠️ **경고:** 13거래일 이상 연속 등재! 강제 청산 규정 적용 대상일 수 있습니다.")
+    else:
+        st.success(f"### ✅ {symbol_input} : 현재 리스트에 없습니다.")
 
 st.divider()
 
-# 5. 오늘자 전체 명단 표시 (참고용)
-st.subheader("📋 오늘자 전체 등재 리스트 확인")
-today_str = datetime.now().strftime('%Y%m%d')
-today_list = get_data_for_date(today_str)
-
-if today_list:
-    st.write(f"오늘({today_str}) 등재된 총 종목 수: {len(today_list)}개")
-    st.write(", ".join(sorted(list(today_list))))
-else:
-    st.info("오늘자 공식 리스트가 아직 업데이트되지 않았거나 휴장일입니다. (어제 데이터를 기준으로 검색해 보세요.)")
-
-st.caption("제공되는 정보는 나스닥 공식 TXT 데이터를 기반으로 계산된 객관적 수치입니다.")
+# 4. 오늘자(혹은 가장 최신) 전체 명단 출력
+st.subheader("📋 전체 등재 명단 확인")
+with st.status("최신 전체 리스트를 불러오는 중...", expanded=True) as status:
+    latest_df = None
+    for i in range(7):
+        d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+        latest_df = get_reg_sho_list(d)
+        if latest_df is not None:
+            st.write(f"✅ {d} 데이터 확인 완료")
+            status.update(label=f"{d} 리스트 로드 완료", state="complete")
+            break
+    
+    if latest_df is not None:
+        st.dataframe(latest_df[['Symbol', 'Security Name', 'Market Category']], use_container_width=True)
+    else:
+        st.error("나스닥 서버에서 데이터를 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.")
