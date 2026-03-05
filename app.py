@@ -22,11 +22,12 @@ def send_telegram_msg(ticker, form_type, headline):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     text = f"🚨 [{ticker}] 신규 SEC 공시 포착!\n\n📌 종류: {form_type}\n📄 내용: {headline}\n⏰ 시간: {datetime.now().strftime('%H:%M:%S')}"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+        res = requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+        return res.status_code == 200
     except:
-        pass
+        return False
 
-# --- 시스템 인프라 ---
+# --- 인프라 설정 ---
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -34,68 +35,27 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 st.set_page_config(page_title="NSD PRO", layout="wide")
 st.title("승현쓰껄ㅋ")
 
-# [입력값 기억 로직]
+# [핵심 수리] 입력값 영구 고정을 위한 기억 장치 초기화
 if 'user_watchlist' not in st.session_state:
-    st.session_state.user_watchlist = "BNAI"
+    st.session_state.user_watchlist = "" # 초기값은 비워둠으로써 BNAI 고정 현상 해결
 
-# --- 상단: 실시간 감시 센터 ---
-with st.expander("🔔 실시간 SEC 공시 감시 리스트", expanded=True):
-    alert_on = st.toggle("텔레그램 푸시 알림 ON", value=True)
-    watch_input = st.text_input("감시할 티커 입력 (쉼표 구분)", value=st.session_state.user_watchlist).upper()
+# --- 상단: 실시간 감시 센터 (테스트 버튼 복구) ---
+with st.expander("🔔 실시간 SEC 공시 감시 및 테스트", expanded=True):
+    alert_on = st.toggle("텔레그램 알림 활성화", value=True)
+    
+    # 입력값 고정을 위해 key를 할당하여 session_state와 직접 연결
+    watch_input = st.text_input(
+        "감시 티커 입력 (예: BNAI, TSLA)", 
+        value=st.session_state.user_watchlist,
+        key="watchlist_input"
+    ).upper()
     st.session_state.user_watchlist = watch_input
     
-    # [신규] 감시 중인 종목을 시각적 '기록'으로 표시
-    if watch_input:
-        watchlist = [t.strip() for t in watch_input.split(",") if t.strip()]
-        st.write("🛰️ **현재 감시 중인 종목:**")
-        
-        # 감시 리스트를 깔끔한 배지로 표시
-        cols = st.columns(len(watchlist) if len(watchlist) > 0 else 1)
-        for i, ticker in enumerate(watchlist):
-            with cols[i % len(cols)]:
-                st.markdown(f"**{ticker}**")
-                st.image(f"https://www.google.com/s2/favicons?sz=64&domain={ticker}.com", width=24)
-        
-        if alert_on:
-            st.caption(f"✅ 위 종목들에 대한 공시 발생 시 즉시 텔레그램으로 문자가 발송됩니다.")
-
-# 3. 데이터 엔진 (로직 및 순서 고정)
-def get_verified_data():
-    try:
-        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
-        if not res.data: return None
-        df = pd.DataFrame(res.data)
-        df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
-        latest_date = df['recorded_date'].max()
-        extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
-        
-        current_market = df[df['recorded_date'] == latest_date]
-        final_rows = []
-        for _, row in current_market.iterrows():
-            sym, name = row['symbol'], row['security_name'].upper()
-            if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): continue
-            display_days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
-            
-            # 🔥 [UI 순서 고정] 등재일 > 로고 > 티커 > 종목명
-            final_rows.append({
-                "등재일": display_days,
-                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
-                "티커": sym,
-                "종목명": name
-            })
-        return pd.DataFrame(final_rows)
-    except: return None
-
-# --- 메인 데이터 출력 ---
-active_df = get_verified_data()
-search = st.text_input("🔍 목록 내 검색", "").upper()
-
-if active_df is not None:
-    if search: active_df = active_df[active_df['티커'].str.contains(search)]
-    st.dataframe(active_df.sort_values(by="등재일", ascending=False),
-        column_config={
-            "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
-            "로고": st.column_config.ImageColumn("", width="small"),
-            "티커": st.column_config.TextColumn("티커"),
-            "종목명": st.column_config.TextColumn("종목명")
-        }, use_container_width=True, hide_index=True)
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        if watch_input:
+            st.info(f"🛰️ 현재 감시 중: {watch_input}")
+    with col2:
+        # [복구] 테스트 알림 버튼
+        if st.button("🚀 테스트 발송"):
+            if send_telegram_msg("TEST", "CHECK", "시스템 연동 및
