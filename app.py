@@ -19,13 +19,12 @@ TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
 def send_telegram_msg(ticker, form_type, headline):
-    """텔레그램 팝업 전송 함수"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     text = f"🚨 [{ticker}] 신규 SEC 공시 포착!\n\n📌 종류: {form_type}\n📄 내용: {headline}"
     try:
         res = requests.post(url, data={"chat_id": CHAT_ID, "text": text}, timeout=10)
         return res.status_code == 200
-    except:
+    except Exception:
         return False
 
 # --- 인프라 설정 ---
@@ -40,7 +39,7 @@ if 'user_watchlist' not in st.session_state:
     st.session_state.user_watchlist = ""
 
 # --- UI 상단: 감시 센터 ---
-st.title("^0^ㅋ")
+st.title("🛡️ Reg sho 등재 목록")
 
 with st.expander("🔔 실시간 SEC 공시 감시 및 테스트", expanded=True):
     alert_on = st.toggle("텔레그램 알림 활성화", value=True)
@@ -74,4 +73,40 @@ def get_verified_data():
         df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
         latest_date = df['recorded_date'].max()
         
-        # 3/4 이후 실제 데이터 기반 추가 날짜 산
+        # 3/4 이후 실제 데이터 기반 추가 날짜 산출
+        extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
+        
+        current_market = df[df['recorded_date'] == latest_date]
+        final_rows = []
+        for _, row in current_market.iterrows():
+            sym, name = row['symbol'], row['security_name'].upper()
+            if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): continue
+            
+            display_days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
+            
+            # 🔥 [UI 순서 절대 고정] 등재일 > 로고 > 티커 > 종목명
+            final_rows.append({
+                "등재일": display_days,
+                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                "티커": sym,
+                "종목명": name
+            })
+        return pd.DataFrame(final_rows)
+    except Exception:
+        return None
+
+# 데이터 출력
+active_df = get_verified_data()
+search = st.text_input("🔍 목록 내 검색", "").upper()
+
+if active_df is not None and not active_df.empty:
+    if search: active_df = active_df[active_df['티커'].str.contains(search)]
+    st.dataframe(
+        active_df.sort_values(by="등재일", ascending=False),
+        column_config={
+            "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
+            "로고": st.column_config.ImageColumn("", width="small"),
+            "티커": st.column_config.TextColumn("티커"),
+            "종목명": st.column_config.TextColumn("종목명")
+        }, use_container_width=True, hide_index=True
+    )
