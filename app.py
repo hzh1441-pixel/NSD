@@ -3,44 +3,65 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 
-# 1. 페이지 설정
-st.set_page_config(page_title="나스닥 Reg SHO 스캐너", layout="wide")
+st.set_page_config(page_title="나스닥 Reg SHO 트래커", layout="wide")
 
-# 2. 가장 최신 데이터 찾아오기 (오늘부터 3일 전까지 자동 검색)
-@st.cache_data(ttl=3600)
-def fetch_data():
-    for i in range(4): # 오늘(0)부터 3일 전까지 시도
+# 1. 연속 일수 계산 함수 (최근 20거래일 스캔)
+def count_consecutive_days(symbol):
+    count = 0
+    checked_dates = []
+    
+    # 최근 20일간의 데이터를 뒤져서 연속성 확인
+    for i in range(25): # 주말 포함 넉넉히 25일 시도
         target_date = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
         url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{target_date}.txt"
+        
         try:
-            response = requests.get(url)
-            if response.status_code == 200 and "Symbol" in response.text:
-                df = pd.read_csv(url, sep='|')
-                df = df[:-1] 
-                df.columns = df.columns.str.strip()
-                return df, target_date
+            response = requests.get(url, timeout=3)
+            if response.status_code == 200 and symbol in response.text:
+                count += 1
+                checked_dates.append(target_date)
+            elif response.status_code == 200 and symbol not in response.text:
+                # 리스트에 없는 날을 발견하면 거기서 멈춤 (연속성 끊김)
+                if count > 0: break 
         except:
             continue
-    return pd.DataFrame(), "데이터 없음"
+    return count, checked_dates
 
-# 3. 화면 구성
-st.title("📱 실시간 나스닥 Reg SHO 트래커")
-df, date = fetch_data()
+# 2. 메인 UI
+st.title("📊 나스닥 Reg SHO 정밀 스캐너")
 
-if not df.empty:
-    st.success(f"✅ 최신 확인된 데이터 날짜: {date} (미국 시간 기준)")
-    symbol = st.text_input("검색할 종목 심볼(예: BNAI)", "").upper()
-    
-    if symbol:
-        res = df[df['Symbol'] == symbol]
-        if not res.empty:
-            st.error(f"🚨 {symbol} 종목은 현재 등재 상태입니다!")
-            st.table(res)
+symbol = st.text_input("심볼 입력 (예: BNAI)", "").upper()
+
+if symbol:
+    with st.spinner(f'{symbol}의 등재 일수를 추적 중입니다...'):
+        days, history = count_consecutive_days(symbol)
+        
+        if days > 0:
+            st.error(f"🚨 **{symbol}** 종목은 현재 **{days}일 연속** 등재 상태입니다!")
+            st.write(f"최근 등재 확인일: {', '.join(history[:5])} ...")
+            
+            if days >= 13:
+                st.warning("⚠️ 13일 이상 등재되었습니다. 강제 청산(Force-out) 가능성을 확인하세요.")
         else:
-            st.info(f"✅ {symbol} 종목은 현재 리스트에 없습니다.")
-    
-    st.divider()
-    st.subheader(f"📋 전체 등재 명단 ({len(df)}개 종목)")
-    st.dataframe(df[['Symbol', 'Security Name', 'Market Category']], use_container_width=True)
+            st.success(f"✅ **{symbol}** 종목은 현재 클린한 상태입니다.")
+
+st.divider()
+
+# 3. 오늘 전체 리스트 보기 (기존 기능)
+@st.cache_data(ttl=3600)
+def fetch_today():
+    today = datetime.now().strftime('%Y%m%d')
+    url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{today}.txt"
+    try:
+        df = pd.read_csv(url, sep='|')[:-1]
+        df.columns = df.columns.str.strip()
+        return df
+    except:
+        return pd.DataFrame()
+
+st.subheader("📋 오늘자 전체 등재 리스트")
+df_today = fetch_today()
+if not df_today.empty:
+    st.dataframe(df_today[['Symbol', 'Security Name']], use_container_width=True)
 else:
-    st.warning("현재 나스닥 데이터를 불러올 수 없습니다. 장 개설 전이거나 서버 점검 중일 수 있습니다.")
+    st.info("오늘자 공식 리스트가 아직 업데이트되지 않았습니다.")
