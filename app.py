@@ -24,108 +24,64 @@ CHAT_ID = "8182795005"
 
 st.set_page_config(page_title="NSD PRO", layout="wide")
 
-# --- [영구 저장 로직] 앱이 켜질 때 DB에서 마지막 기록을 강제로 가져옴 ---
-@st.cache_data(ttl=5) # 짧은 캐시로 DB 부하 방지 및 최신화
-def fetch_saved_config():
+# --- [수리 완료] 영구 저장 및 동기화 엔진 ---
+def fetch_config_from_db():
     try:
         res = supabase.table("user_config").select("watchlist, alert_enabled").eq("id", 1).execute()
         if res.data:
             return res.data[0]
-    except:
-        pass
+    except: pass
     return {"watchlist": "", "alert_enabled": True}
 
-# 초기화 로직: 앱이 켜지자마자 실행
-saved_data = fetch_saved_config()
-if 'user_watchlist' not in st.session_state:
-    st.session_state.user_watchlist = saved_data['watchlist']
-if 'alert_on' not in st.session_state:
-    st.session_state.alert_on = saved_data['alert_enabled']
+# 초기 실행 시 DB에서 데이터를 딱 한 번만 가져와 세션에 박제
+if 'initialized' not in st.session_state:
+    db_data = fetch_config_from_db()
+    st.session_state.user_watchlist = db_data['watchlist']
+    st.session_state.alert_on = db_data['alert_enabled']
+    st.session_state.initialized = True
 
-def update_config():
-    """사용자가 입력값을 바꾸는 즉시 DB에 영구 저장"""
+def sync_to_db():
+    """엔터키를 치거나 토글을 누르면 즉시 실행되는 DB 동기화 함수"""
+    # 입력창(key="new_watchlist")과 토글(key="new_alert_on")의 최신 값을 가져옴
+    current_watchlist = st.session_state.new_watchlist.upper()
+    current_alert = st.session_state.new_alert_on
+    
     try:
         supabase.table("user_config").upsert({
             "id": 1,
-            "watchlist": st.session_state.new_watchlist,
-            "alert_enabled": st.session_state.new_alert_on
+            "watchlist": current_watchlist,
+            "alert_enabled": current_alert
         }).execute()
-        st.session_state.user_watchlist = st.session_state.new_watchlist
-        st.session_state.alert_on = st.session_state.new_alert_on
+        # 세션 상태 업데이트
+        st.session_state.user_watchlist = current_watchlist
+        st.session_state.alert_on = current_alert
+        st.toast("✅ 설정이 안전하게 저장되었습니다.")
     except:
-        pass
+        st.error("⚠️ 저장 실패 (DB 연결 확인)")
 
 st.title("🛡️ Reg sho 등재 목록")
 
 # --- UI 상단: 24시간 실시간 감시 설정 ---
 with st.expander("🔔 24시간 공시 감시 설정 (앱을 꺼도 유지됨)", expanded=True):
-    # 알림 스위치와 티커 입력창을 DB 값과 동기화
-    alert_on = st.toggle(
+    # [수리] value를 쓰지 않고 key와 on_change로만 제어하여 엔터키 씹힘 방지
+    st.toggle(
         "텔레그램 알림 활성화", 
         value=st.session_state.alert_on, 
         key="new_alert_on", 
-        on_change=update_config
+        on_change=sync_to_db
     )
     
-    watch_input = st.text_input(
-        "감시 티커 입력 (쉼표 구분)", 
+    st.text_input(
+        "감시 티커 입력 (엔터를 치면 저장됩니다)", 
         value=st.session_state.user_watchlist, 
         key="new_watchlist", 
-        on_change=update_config,
+        on_change=sync_to_db,
         placeholder="예: BNAI, TSLA"
-    ).upper()
+    )
 
     col1, col2 = st.columns([4, 1])
     with col1:
         if st.session_state.user_watchlist:
-            st.success(f"🛰️ 현재 서버 감시 중: {st.session_state.user_watchlist}")
+            st.info(f"🛰️ 현재 서버에서 감시 중: {st.session_state.user_watchlist}")
     with col2:
-        if st.button("🚀 테스트 발송"):
-            requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
-                          data={"chat_id": CHAT_ID, "text": f"✅ 연결 및 영구 저장 정상\n감시 목록: {st.session_state.user_watchlist}"})
-            st.toast("테스트 성공!")
-
-# 3. 데이터 엔진 (로직 및 순서 100% 보존: 등재일 > 로고 > 티커 > 종목명)
-def get_verified_data():
-    try:
-        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
-        if not res.data: return None
-        df = pd.DataFrame(res.data)
-        df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
-        latest_date = df['recorded_date'].max()
-        
-        extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
-        current_market = df[df['recorded_date'] == latest_date]
-        
-        final_rows = []
-        for _, row in current_market.iterrows():
-            sym, name = row['symbol'], row['security_name'].upper()
-            if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): continue
-            
-            days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
-            
-            # 🔥 [UI 순서 절대 고정] 등재일 > 로고 > 티커 > 종목명
-            final_rows.append({
-                "등재일": days,
-                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
-                "티커": sym,
-                "종목명": name
-            })
-        return pd.DataFrame(final_rows)
-    except: return None
-
-# 데이터 출력 영역
-active_df = get_verified_data()
-search = st.text_input("🔍 목록 내 검색", "").upper()
-
-if active_df is not None and not active_df.empty:
-    if search: active_df = active_df[active_df['티커'].str.contains(search)]
-    st.dataframe(
-        active_df.sort_values(by="등재일", ascending=False),
-        column_config={
-            "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
-            "로고": st.column_config.ImageColumn("", width="small"),
-            "티커": st.column_config.TextColumn("티커"),
-            "종목명": st.column_config.TextColumn("종목명")
-        }, use_container_width=True, hide_index=True
-    )
+        if
