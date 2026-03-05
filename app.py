@@ -30,10 +30,11 @@ def fetch_config_from_db():
         res = supabase.table("user_config").select("watchlist, alert_enabled").eq("id", 1).execute()
         if res.data:
             return res.data[0]
-    except: pass
+    except Exception:
+        pass
     return {"watchlist": "", "alert_enabled": True}
 
-# 초기 실행 시 DB에서 데이터를 딱 한 번만 가져와 세션에 박제
+# 초기 로딩 시 DB에서 데이터를 가져와 세션에 박제 (재부팅 시 유지의 핵심)
 if 'initialized' not in st.session_state:
     db_data = fetch_config_from_db()
     st.session_state.user_watchlist = db_data['watchlist']
@@ -41,47 +42,25 @@ if 'initialized' not in st.session_state:
     st.session_state.initialized = True
 
 def sync_to_db():
-    """엔터키를 치거나 토글을 누르면 즉시 실행되는 DB 동기화 함수"""
-    # 입력창(key="new_watchlist")과 토글(key="new_alert_on")의 최신 값을 가져옴
+    """입력 즉시 DB에 저장하여 앱 종료 시에도 보존"""
     current_watchlist = st.session_state.new_watchlist.upper()
     current_alert = st.session_state.new_alert_on
-    
     try:
         supabase.table("user_config").upsert({
             "id": 1,
             "watchlist": current_watchlist,
             "alert_enabled": current_alert
         }).execute()
-        # 세션 상태 업데이트
         st.session_state.user_watchlist = current_watchlist
         st.session_state.alert_on = current_alert
         st.toast("✅ 설정이 안전하게 저장되었습니다.")
-    except:
-        st.error("⚠️ 저장 실패 (DB 연결 확인)")
+    except Exception:
+        st.error("⚠️ 저장 실패 (DB 확인 필요)")
 
 st.title("🛡️ Reg sho 등재 목록")
 
-# --- UI 상단: 24시간 실시간 감시 설정 ---
+# --- UI 상단: 24시간 실시간 감시 설정 (테스트 버튼 복구) ---
 with st.expander("🔔 24시간 공시 감시 설정 (앱을 꺼도 유지됨)", expanded=True):
-    # [수리] value를 쓰지 않고 key와 on_change로만 제어하여 엔터키 씹힘 방지
     st.toggle(
         "텔레그램 알림 활성화", 
-        value=st.session_state.alert_on, 
-        key="new_alert_on", 
-        on_change=sync_to_db
-    )
-    
-    st.text_input(
-        "감시 티커 입력 (엔터를 치면 저장됩니다)", 
-        value=st.session_state.user_watchlist, 
-        key="new_watchlist", 
-        on_change=sync_to_db,
-        placeholder="예: BNAI, TSLA"
-    )
-
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        if st.session_state.user_watchlist:
-            st.info(f"🛰️ 현재 서버에서 감시 중: {st.session_state.user_watchlist}")
-    with col2:
-        if
+        value=st.session_state.alert_on,
