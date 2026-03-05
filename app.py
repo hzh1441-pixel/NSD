@@ -30,7 +30,7 @@ def get_logo_url(ticker):
     return f"https://www.google.com/s2/favicons?sz=128&domain={domain}"
 
 # --- UI 상단: SEC 공시 알림 설정 ---
-st.title("🛡️승현쓰껄 ^0^🛡️")
+st.title("승현쓰껄 ^0^ㅋ")
 
 with st.expander("🔔 모바일 실시간 SEC 공시 알림 (Ortex 연동)", expanded=True):
     alert_on = st.toggle("알림 활성화 (ON/OFF)", value=True)
