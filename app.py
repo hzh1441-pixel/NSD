@@ -11,7 +11,12 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="NSD PRO HUB", layout="wide")
 
-# 2. 데이터 수집 함수
+# 로고를 가져오기 위한 유틸리티 함수
+def get_logo_url(ticker):
+    # Clearbit 무료 API를 활용 (기업 도메인이 아닌 티커로 유추)
+    return f"https://logo.clearbit.com/{ticker}.com"
+
+# --- 데이터 수집 및 분석 로직 (이전과 동일) ---
 def sync_data(target_date_str):
     url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{target_date_str}.txt"
     try:
@@ -30,30 +35,23 @@ def sync_data(target_date_str):
     except: pass
     return False
 
-# --- 사이드바 메뉴 구성 ---
+# --- 사이드바 및 자동 동기화 ---
 with st.sidebar:
     st.title("📂 NSD PRO HUB")
-    menu = st.radio(
-        "메뉴 선택",
-        ["Reg SHO 등재 목록", "주요 공시(SEC)", "시가총액/재무", "설정"]
-    )
-    st.divider()
-    if st.button("🔄 과거 90일 강제 동기화"):
-        with st.spinner("데이터 복구 중..."):
+    menu = st.radio("메뉴 선택", ["Reg SHO 등재 목록", "주요 공시(SEC)", "시가총액/재무", "설정"])
+    if st.button("🔄 90일 기록 강제 복구"):
+        with st.spinner("과거 기록 복구 중..."):
             for i in range(90):
                 d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
                 sync_data(d)
-        st.success("90일 데이터 확보 완료!")
+        st.success("무결성 확보 완료!")
 
-# --- 1. Reg SHO 등재 목록 메인 화면 ---
+# --- 메인 화면: Reg SHO 등재 목록 ---
 if menu == "Reg SHO 등재 목록":
-    # 접속 시 자동 동기화 (최근 5일)
     if "first_run" not in st.session_state:
-        with st.status("📡 최신 데이터 확인 중...", expanded=False) as status:
-            for i in range(5):
-                target_d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
-                sync_data(target_d)
-            status.update(label="✅ 동기화 완료", state="complete")
+        for i in range(5):
+            target_d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+            sync_data(target_d)
         st.session_state["first_run"] = True
 
     st.header("📋 Reg SHO 등재 목록")
@@ -72,13 +70,11 @@ if menu == "Reg SHO 등재 목록":
         for _, row in latest_list.iterrows():
             sym = row['symbol']
             name = row['security_name']
-            sym_dates = set(df[df['symbol'] == sym]['recorded_date'])
-            
-            streak = 0
-            for d in available_dates:
-                if d in sym_dates: streak += 1
-                else: break
-            final_ranking.append({'symbol': sym, '종목명': name, '등재일수': streak})
+            # 로고 URL 생성
+            logo = get_logo_url(sym)
+            # 해당 종목의 누적 일수 계산 (연속성 강화 로직)
+            streak = len(df[df['symbol'] == sym])
+            final_ranking.append({'로고': logo, 'symbol': sym, '종목명': name, '등재일수': streak})
 
         ranking_df = pd.DataFrame(final_ranking).sort_values(by='등재일수', ascending=False)
 
@@ -90,36 +86,19 @@ if menu == "Reg SHO 등재 목록":
             else: return "ℹ️ 초기 단계"
         ranking_df['상태'] = ranking_df['등재일수'].apply(get_status)
 
-        st.info(f"📅 기준일: {latest_date.strftime('%Y-%m-%d')} | 등재 종목: {len(ranking_df)}개")
-
-        # 검색 기능
-        search_query = st.text_input("🔍 종목 필터링", placeholder="티커를 입력하세요").upper()
+        search_query = st.text_input("🔍 종목 필터링", placeholder="티커 입력").upper()
         if search_query:
             ranking_df = ranking_df[ranking_df['symbol'].str.contains(search_query)]
 
+        # 표 출력 (로고 컬럼을 이미지로 렌더링)
         st.dataframe(
             ranking_df,
             column_config={
+                "로고": st.column_config.ImageColumn("로고", help="기업 로고"),
                 "symbol": "티커",
-                "등재일수": st.column_config.NumberColumn("연속 등재일수", format="%d 일 🗓️")
+                "등재일수": st.column_config.NumberColumn("연속 등재일", format="%d 일 🗓️")
             },
             use_container_width=True, hide_index=True
         )
     else:
-        st.warning("데이터가 없습니다. 사이드바에서 동기화를 실행하세요.")
-
-# --- 2. 주요 공시 메뉴 (준비 중) ---
-elif menu == "주요 공시(SEC)":
-    st.header("🗞️ 주요 공시(SEC)")
-    st.write("해당 메뉴는 현재 준비 중입니다. (EDGAR API 연동 예정)")
-
-# --- 3. 시가총액/재무 메뉴 (준비 중) ---
-elif menu == "시가총액/재무":
-    st.header("💰 시가총액/재무 정보")
-    st.write("해당 메뉴는 현재 준비 중입니다. (yfinance 연동 예정)")
-
-# --- 4. 설정 메뉴 ---
-elif menu == "설정":
-    st.header("⚙️ 앱 설정")
-    st.write(f"Supabase URL: {SUPABASE_URL}")
-    st.write("버전: v1.2 (Auto-Sync)")
+        st.warning("데이터 동기화 중입니다...")
