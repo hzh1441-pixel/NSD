@@ -5,74 +5,95 @@ from datetime import datetime, timedelta
 
 # 1. 페이지 설정
 st.set_page_config(page_title="NSD REG SHO", layout="wide")
-st.title("📊 NSD REG SHO (실시간 트래커)")
+st.title("📊 NSD REG SHO (전체 종목 추적기)")
 
-# 2. 데이터 수집 핵심 함수
+# 2. 데이터 수집 함수 (캐시 적용으로 속도 향상)
+@st.cache_data(ttl=3600)
 def get_reg_sho_list(target_date):
     url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{target_date}.txt"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200 and "Symbol" in response.text:
-            df = pd.read_csv(url, sep='|')[:-1] # 마지막 요약줄 제거
+            df = pd.read_csv(url, sep='|')[:-1]
             df.columns = df.columns.str.strip()
             return df
     except:
         pass
     return None
 
-# 3. 연속 일수 및 최신 데이터 확인 로직
-st.subheader("🔎 종목 정밀 분석")
-symbol_input = st.text_input("심볼을 입력하세요 (예: BNAI)", "").upper()
-
-if symbol_input:
-    progress_text = st.empty()
-    days_count = 0
-    found_dates = []
-    
-    # 최근 30일간을 역순으로 훑으며 '연속성' 계산
-    for i in range(30):
-        check_date = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
-        progress_text.text(f"⏳ {check_date} 나스닥 공식 기록 대조 중...")
-        
-        df = get_reg_sho_list(check_date)
-        
-        if df is not None:
-            if symbol_input in df['Symbol'].values:
-                days_count += 1
-                found_dates.append(check_date)
-            else:
-                # 리스트에 없는 날이 나오면 연속성이 끊긴 것이므로 중단
-                if days_count > 0: break
-        else:
-            # 주말/휴장일로 파일이 없는 경우는 무시하고 계속 진행 (연속성 유지)
-            continue
-            
-    progress_text.empty() # 진행 메시지 삭제
-
-    if days_count > 0:
-        st.error(f"### 🚨 {symbol_input} : 현재 {days_count}일 연속 등재 중")
-        with st.expander("상세 등재 날짜 보기"):
-            st.write(", ".join(found_dates))
-        if days_count >= 13:
-            st.warning("⚠️ **경고:** 13거래일 이상 연속 등재! 강제 청산 규정 적용 대상일 수 있습니다.")
-    else:
-        st.success(f"### ✅ {symbol_input} : 현재 리스트에 없습니다.")
-
-st.divider()
-
-# 4. 오늘자(혹은 가장 최신) 전체 명단 출력
-st.subheader("📋 전체 등재 명단 확인")
-with st.status("최신 전체 리스트를 불러오는 중...", expanded=True) as status:
+# 3. 전체 종목 등재 일수 계산 로직
+@st.cache_data(ttl=3600)
+def get_full_list_with_days():
+    # 오늘 기준 가장 최신 리스트 찾기
     latest_df = None
+    latest_date = ""
     for i in range(7):
         d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
         latest_df = get_reg_sho_list(d)
         if latest_df is not None:
-            st.write(f"✅ {d} 데이터 확인 완료")
-            status.update(label=f"{d} 리스트 로드 완료", state="complete")
+            latest_date = d
             break
     
-    if latest_df is not None:
-        st.dataframe(latest_df[['Symbol', 'Security Name', 'Market Category']], use_container_width=True)
+    if latest_df is None: return None, None
+
+    # 등재 일수 계산 (최근 20거래일 데이터 활용)
+    days_map = {sym: 1 for sym in latest_df['Symbol'].tolist()}
+    
+    # 과거 데이터를 역순으로 확인하며 일수 누적
+    for i in range(1, 20):
+        prev_date = (datetime.strptime(latest_date, '%Y%m%d') - timedelta(days=i)).strftime('%Y%m%d')
+        prev_df = get_reg_sho_list(prev_date)
+        
+        if prev_df is not None:
+            prev_symbols = set(prev_df['Symbol'].tolist())
+            for sym in list(days_map.keys()):
+                if sym in prev_symbols:
+                    days_map[sym] += 1
+                else:
+                    # 연속성이 끊긴 종목은 더 이상 계산하지 않음
+                    pass 
+        else: continue # 주말/휴장일은 건너뜀
+
+    latest_df['Days'] = latest_df['Symbol'].map(days_map)
+    return latest_df, latest_date
+
+# 4. 화면 구성
+full_df, update_date = get_full_list_with_days()
+
+if full_df is not None:
+    st.success(f"✅ {update_date} 데이터 기준 | 총 {len(full_df)}개 종목 분석 완료")
+    
+    # 상단 요약 지표 (13일 이상 위험 종목 표시)
+    danger_count = len(full_df[full_df['Days'] >= 13])
+    st.metric("13거래일 이상 등재 (위험)", f"{danger_count} 종목")
+
+    # 정렬 버튼 레이아웃
+    col1, col2, col3 = st.columns([1, 1, 4])
+    with col1:
+        sort_by_name = st.button("🔤 이름순 정렬")
+    with col2:
+        sort_by_days = st.button("🔥 등재일순 정렬")
+
+    # 데이터 정렬 처리
+    display_df = full_df[['Symbol', 'Security Name', 'Days', 'Market Category']]
+    if sort_by_name:
+        display_df = display_df.sort_values(by='Symbol')
+    elif sort_by_days:
+        display_df = display_df.sort_values(by='Days', ascending=False)
     else:
-        st.error("나스닥 서버에서 데이터를 가져올 수 없습니다. 잠시 후 다시 시도해 주세요.")
+        # 기본값은 등재일 높은 순
+        display_df = display_df.sort_values(by='Days', ascending=False)
+
+    # 표 출력
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Days": st.column_config.NumberColumn("연속 등재일", format="%d 일 🗓️"),
+            "Symbol": "티커",
+            "Security Name": "종목명"
+        }
+    )
+else:
+    st.error("나스닥 서버에서 데이터를 불러올 수 없습니다.")
