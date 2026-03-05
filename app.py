@@ -4,90 +4,87 @@ import requests
 from datetime import datetime, timedelta
 
 st.set_page_config(page_title="NSD REG SHO", layout="wide")
-st.title("📊 NSD REG SHO (정밀 분석 모드)")
+st.title("📊 NSD REG SHO (거래일 정밀 계산기)")
 
 @st.cache_data(ttl=3600)
-def get_reg_sho_list(target_date):
-    url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{target_date}.txt"
+def fetch_nasdaq_file(date_str):
+    url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{date_str}.txt"
     try:
-        response = requests.get(url, timeout=3)
-        if response.status_code == 200 and "Symbol" in response.text:
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200 and "Symbol" in resp.text:
             df = pd.read_csv(url, sep='|')[:-1]
             df.columns = [c.strip() for c in df.columns]
-            return set(df['Symbol'].unique()) # 속도를 위해 세트로 반환
+            return set(df['Symbol'].unique())
+        return "EMPTY" # 파일이 없음 (주말/휴일)
     except:
-        pass
-    return None
+        return "ERROR" # 서버 통신 에러
 
-@st.cache_data(ttl=3600)
-def get_full_analysis():
+def get_accurate_analysis():
+    # 1. 최신 영업일 파일 찾기
     latest_df = None
-    latest_date = ""
-    # 1. 최신 리스트 확보
-    for i in range(7):
+    latest_date = None
+    for i in range(10):
         d = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
-        url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{d}.txt"
-        try:
-            res = requests.get(url, timeout=3)
-            if res.status_code == 200:
-                latest_df = pd.read_csv(url, sep='|')[:-1]
-                latest_df.columns = [c.strip() for c in latest_df.columns]
-                latest_date = d
-                break
-        except: continue
+        data = fetch_nasdaq_file(d)
+        if isinstance(data, set):
+            latest_date = d
+            # 표시용 전체 데이터 로드
+            raw_url = f"https://www.nasdaqtrader.com/dynamic/symdir/regsho/nasdaqth{d}.txt"
+            latest_df = pd.read_csv(raw_url, sep='|')[:-1]
+            latest_df.columns = [c.strip() for c in latest_df.columns]
+            break
     
-    if latest_df is None: return None, None
+    if not latest_df is not None: return None, None
 
-    # 2. 정밀 연속 일수 계산 (60일 역추적)
-    active_symbols = latest_df['Symbol'].unique().tolist()
-    days_map = {sym: 1 for sym in active_symbols}
-    still_on_streak = {sym: True for sym in active_symbols}
-
-    # 과거 60일치를 대조하여 연속성 확인
-    for i in range(1, 60):
-        if not any(still_on_streak.values()): break # 모든 종목 스트릭 깨지면 중단
+    # 2. 거래일 기준 역추적 (최대 60일)
+    symbols = latest_df['Symbol'].unique().tolist()
+    days_map = {sym: 1 for sym in symbols}
+    active_streak = {sym: True for sym in symbols}
+    
+    current_check = datetime.strptime(latest_date, '%Y%m%d')
+    trading_days_found = 1
+    
+    # 과거로 60일간의 '거래일'을 뒤짐
+    for i in range(1, 80): 
+        if trading_days_found >= 60: break
+        check_date = (current_check - timedelta(days=i)).strftime('%Y%m%d')
+        prev_symbols = fetch_nasdaq_file(check_date)
         
-        check_date = (datetime.strptime(latest_date, '%Y%m%d') - timedelta(days=i)).strftime('%Y%m%d')
-        prev_symbols = get_reg_sho_list(check_date)
-        
-        if prev_symbols is not None: # 영업일 데이터가 있는 경우
-            for sym in active_symbols:
-                if still_on_streak[sym]:
+        if isinstance(prev_symbols, set): # 정상 거래일 데이터 발견
+            trading_days_found += 1
+            for sym in symbols:
+                if active_streak[sym]:
                     if sym in prev_symbols:
                         days_map[sym] += 1
                     else:
-                        still_on_streak[sym] = False # 여기서 스트릭 종료
+                        active_streak[sym] = False # 리스트에 없으므로 스트릭 종료
+        elif prev_symbols == "EMPTY":
+            continue # 휴장일이므로 카운트 유지하고 다음 날짜 확인
         else:
-            continue # 주말/휴일은 건너뛰고 연속성 유지
-
-    latest_df['연속 등재일'] = latest_df['Symbol'].map(days_map)
+            continue # 서버 에러일 경우 일단 유지하고 더 과거 확인
+            
+    latest_df['연속 거래일'] = latest_df['Symbol'].map(days_map)
     return latest_df, latest_date
 
-# 화면 출력
-with st.status("나스닥 60일치 공식 기록 정밀 대조 중...", expanded=True) as status:
-    df, update_date = get_full_analysis()
-    if df is not None:
-        status.update(label=f"✅ {update_date} 데이터 분석 완료", state="complete")
+# 실행 및 결과 출력
+with st.spinner('나스닥 공식 서버에서 거래일 데이터를 정밀 대조 중입니다...'):
+    df, last_date = get_accurate_analysis()
 
 if df is not None:
-    # 정렬 옵션
-    sort_option = st.radio("정렬 방식 선택", ["등재일 많은 순 (위험군)", "티커 이름 순"], horizontal=True)
+    st.success(f"✅ {last_date} 기준 데이터 (주말/공휴일 제외 거래일 계산 완료)")
     
-    display_df = df[['Symbol', 'Security Name', '연속 등재일']]
-    if sort_option == "등재일 많은 순 (위험군)":
-        display_df = display_df.sort_values(by='연속 등재일', ascending=False)
-    else:
-        display_df = display_df.sort_values(by='Symbol')
+    # 13일 이상 종목 하이라이트
+    danger_df = df[df['연속 거래일'] >= 13]
+    if not danger_df.empty:
+        st.warning(f"⚠️ 현재 13거래일 이상 등재된 종목이 {len(danger_df)}개 있습니다.")
 
+    # 표 출력
+    display_df = df[['Symbol', 'Security Name', '연속 거래일']].sort_values(by='연속 거래일', ascending=False)
     st.dataframe(
         display_df,
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "연속 등재일": st.column_config.NumberColumn("연속 등재일", format="%d 일 🔥"),
-            "Symbol": "티커",
-            "Security Name": "종목명"
-        }
+        column_config={"연속 거래일": st.column_config.NumberColumn("연속 거래일", format="%d일 🔥")}
     )
 else:
-    st.error("데이터 로드 실패. 미국 시차를 확인해 주세요.")
+    st.error("데이터를 불러오는 데 실패했습니다. 잠시 후 새로고침해 보세요.")
