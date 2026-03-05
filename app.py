@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from supabase import create_client
 
-# 1. 사진 팩트 (기준: 2026-03-04)
+# 1. 사진 실증 절대값 (기준: 2026-03-04)
 PHOTO_FACTS = {
     "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
     "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12,
@@ -17,59 +17,63 @@ SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="NSD PRO: TOTAL TRACKER", layout="wide")
+st.set_page_config(page_title="NSD PRO: FACT MASTER", layout="wide")
 
-# --- 데이터 통합 처리 ---
-res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
-
-if res.data:
+# --- 데이터 엔진 ---
+def run_fact_engine():
+    res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
+    if not res.data: return None, None
+    
     df = pd.DataFrame(res.data)
     df['recorded_date'] = pd.to_datetime(df['recorded_date'])
     latest_date = df['recorded_date'].max()
     
-    # [팩트 체크 환경]
-    current_market_list = set(df[df['recorded_date'] == latest_date]['symbol'].unique())
-    days_passed = (datetime.now().date() - datetime(2026, 3, 4).date()).days
+    # 시간 계산 (3/4 기준)
+    days_diff = (datetime.now().date() - datetime(2026, 3, 4).date()).days
+    current_market = set(df[df['recorded_date'] == latest_date]['symbol'].unique())
     
-    final_rows = []
-
-    for sym in current_market_list:
-        name = df[df['symbol'] == sym]['security_name'].iloc[0]
-        
-        # A. 사진 팩트 종목 (절대값 우선)
+    active_rows = []
+    # 1단계: 오늘 시장에 있는 놈들 처리
+    for sym in current_market:
+        name = df[df['symbol'] == sym]['security_name'].mode()[0]
         if sym in PHOTO_FACTS:
-            actual_days = PHOTO_FACTS[sym] + days_passed
-            tag = "✅ 실증(사진)"
+            days = PHOTO_FACTS[sym] + days_diff
+            tag = "✅ 사진실증"
         else:
-            # B. 기존 DB 추적 종목 vs C. 신규 진입 종목 판별
-            db_count = len(df[df['symbol'] == sym])
-            actual_days = db_count
+            days = len(df[df['symbol'] == sym])
+            tag = "✨ 신규진입" if days == 1 else "⏳ DB기록"
             
-            if db_count == 1:
-                tag = "✨ 신규 진입" # 오늘 처음 발견됨
-            else:
-                tag = "⏳ DB 추적 중"
+        active_rows.append({"티커": sym, "종목명": name, "등재일": days, "상태": tag})
 
-        final_rows.append({
-            "티커": sym,
-            "종목명": name,
-            "누적 등재일": actual_days,
-            "구분": tag
-        })
+    # 2단계: 사진에는 있었는데 오늘 명단엔 없는 '탈출자' 추출 (사용자님의 핵심 질문)
+    exited_rows = []
+    for sym, base in PHOTO_FACTS.items():
+        if sym not in current_market:
+            exited_rows.append({
+                "티커": sym,
+                "최종등재일": base + (days_diff - 1), # 사라지기 전날까지의 기록
+                "탈출날짜": latest_date.strftime('%m-%d')
+            })
+            
+    return pd.DataFrame(active_rows), pd.DataFrame(exited_rows)
 
-    # --- UI 출력 ---
-    st.title("🛡️ Reg SHO 통합 실증 시스템")
+# --- UI ---
+st.title("🛡️ Reg SHO 자립형 실증 시스템")
+search = st.text_input("🔍 티커 검색", "").upper()
+
+active_df, exited_df = run_fact_engine()
+
+if active_df is not None:
+    if search: active_df = active_df[active_df['티커'].str.contains(search)]
     
-    # 1. 전체 등재 리스트 (정렬 가능)
-    st.subheader("📊 현재 등재 종목 (실시간 팩트 반영)")
-    ranking_df = pd.DataFrame(final_rows).sort_values(by="누적 등재일", ascending=False)
-    st.dataframe(ranking_df, use_container_width=True, hide_index=True)
+    t1, t2 = st.tabs(["🔥 실시간 등재 목록", "📉 해제/삭제 데이터 추출"])
     
-    # 2. 신규 진입 종목만 따로 추출해서 보여주기
-    new_entries = [row for row in final_rows if row["구분"] == "✨ 신규 진입"]
-    if new_entries:
-        st.toast(f"오늘 {len(new_entries)}개의 신규 종목이 등재되었습니다!")
-        with st.expander("🆕 오늘의 신규 진입 종목 확인"):
-            st.table(pd.DataFrame(new_entries)[["티커", "종목명"]])
-
-    st.info(f"💡 사진 팩트 기반 합산과 신규 진입 탐지가 동시에 가동 중입니다. (BNAI: {PHOTO_FACTS['BNAI']+days_passed}일)")
+    with t1:
+        st.dataframe(active_df.sort_values(by="등재일", ascending=False), use_container_width=True, hide_index=True)
+        
+    with t2:
+        if not exited_df.empty:
+            st.warning("⚠️ 사진 데이터 중 다음 종목들이 리스트에서 삭제되었습니다.")
+            st.table(exited_df) # 여기서 데이터 추출 가능
+        else:
+            st.info("현재까지 사진 속 모든 종목이 생존해 있습니다.")
