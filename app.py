@@ -14,21 +14,19 @@ PHOTO_FACTS = {
     "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
-# --- 텔레그램 설정 (사용자 정보 반영 완료) ---
+# --- 텔레그램 설정 ---
 TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
 def send_telegram_msg(ticker, form_type, headline):
-    """텔레그램으로 즉시 문자를 쏘는 핵심 엔진"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     text = f"🚨 [{ticker}] 신규 SEC 공시 포착!\n\n📌 종류: {form_type}\n📄 내용: {headline}\n⏰ 시간: {datetime.now().strftime('%H:%M:%S')}"
     try:
-        response = requests.post(url, data={"chat_id": CHAT_ID, "text": text})
-        return response.status_code == 200
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except:
-        return False
+        pass
 
-# --- 시스템 인프라 설정 ---
+# --- 시스템 인프라 ---
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -38,21 +36,28 @@ st.title("승현쓰껄ㅋ")
 
 # [입력값 기억 로직]
 if 'user_watchlist' not in st.session_state:
-    st.session_state.user_watchlist = ""
+    st.session_state.user_watchlist = "BNAI"
 
-# --- 상단: 알림 제어 센터 ---
-with st.expander("🔔 텔레그램 알림 제어 및 테스트", expanded=True):
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        alert_on = st.toggle("알림 활성화 (ON/OFF)", value=True)
-        watch_input = st.text_input("감시 티커 (예: BNAI, TSLA)", value=st.session_state.user_watchlist).upper()
-        st.session_state.user_watchlist = watch_input
-    with col2:
-        st.write("") # 간격 맞춤
-        if st.button("🚀 테스트 알림 발송"):
-            success = send_telegram_msg("BNAI", "TEST", "시스템 연동 테스트 성공! (등재일 데이터 보존 완료)")
-            if success: st.success("알림 전송됨!")
-            else: st.error("전송 실패 (토큰 확인 필요)")
+# --- 상단: 실시간 감시 센터 ---
+with st.expander("🔔 실시간 SEC 공시 감시 리스트", expanded=True):
+    alert_on = st.toggle("텔레그램 푸시 알림 ON", value=True)
+    watch_input = st.text_input("감시할 티커 입력 (쉼표 구분)", value=st.session_state.user_watchlist).upper()
+    st.session_state.user_watchlist = watch_input
+    
+    # [신규] 감시 중인 종목을 시각적 '기록'으로 표시
+    if watch_input:
+        watchlist = [t.strip() for t in watch_input.split(",") if t.strip()]
+        st.write("🛰️ **현재 감시 중인 종목:**")
+        
+        # 감시 리스트를 깔끔한 배지로 표시
+        cols = st.columns(len(watchlist) if len(watchlist) > 0 else 1)
+        for i, ticker in enumerate(watchlist):
+            with cols[i % len(cols)]:
+                st.markdown(f"**{ticker}**")
+                st.image(f"https://www.google.com/s2/favicons?sz=64&domain={ticker}.com", width=24)
+        
+        if alert_on:
+            st.caption(f"✅ 위 종목들에 대한 공시 발생 시 즉시 텔레그램으로 문자가 발송됩니다.")
 
 # 3. 데이터 엔진 (로직 및 순서 고정)
 def get_verified_data():
@@ -71,7 +76,7 @@ def get_verified_data():
             if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): continue
             display_days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
             
-            # 🔥 [UI 순서 절대 고정] 등재일 > 로고 > 티커 > 종목명
+            # 🔥 [UI 순서 고정] 등재일 > 로고 > 티커 > 종목명
             final_rows.append({
                 "등재일": display_days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
@@ -81,13 +86,16 @@ def get_verified_data():
         return pd.DataFrame(final_rows)
     except: return None
 
-# 데이터 출력
+# --- 메인 데이터 출력 ---
 active_df = get_verified_data()
+search = st.text_input("🔍 목록 내 검색", "").upper()
+
 if active_df is not None:
+    if search: active_df = active_df[active_df['티커'].str.contains(search)]
     st.dataframe(active_df.sort_values(by="등재일", ascending=False),
         column_config={
-            "등재일": st.column_config.NumberColumn("등재일", format="%d 일"),
-            "로고": st.column_config.ImageColumn(""),
+            "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
+            "로고": st.column_config.ImageColumn("", width="small"),
             "티커": st.column_config.TextColumn("티커"),
             "종목명": st.column_config.TextColumn("종목명")
         }, use_container_width=True, hide_index=True)
