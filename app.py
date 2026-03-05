@@ -45,7 +45,7 @@ if "app_initialized" not in st.session_state:
 # ==========================================
 # 3. UI 및 동기화
 # ==========================================
-st.title("🛡️ Reg sho 등재 목록")
+st.title("승현쓰껄ㅋ")
 
 with st.expander("🔔 실시간 알림 및 감시 종목 설정 (영구 저장)", expanded=True):
     current_alert = st.toggle("텔레그램 알림 활성화", value=st.session_state.alert_on)
