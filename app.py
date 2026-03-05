@@ -3,13 +3,15 @@ import pandas as pd
 from datetime import datetime
 from supabase import create_client
 
-# 1. 사진 실증 절대값 (기준: 2026-03-04)
+# 1. [마스터 팩트] 개별 종목만 엄선 (ETF 제외, 3/4 기준)
+# 사용자님의 명령에 따라 ETF 성격의 종목은 모두 삭제했습니다.
 PHOTO_FACTS = {
-    "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
-    "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12,
-    "BRTX": 10, "NCI": 10, "HBR": 9, "NVDL": 9, "RIME": 9, "LFS": 8, "LGHL": 8, "PDC": 8,
-    "XTKG": 7, "CDIO": 6, "DYTA": 5, "GGLS": 5, "GV": 5, "MGRX": 5, "PFSA": 5, "RUBI": 5,
-    "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "HIMZ": 2, "IONZ": 2
+    "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16, 
+    "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12, 
+    "GFAI": 11, "BRTX": 10, "NCI": 10, "HUBC": 10, "DTST": 10, "HBR": 9, 
+    "NVDL": 9, "RIME": 9, "LFS": 8, "LGHL": 8, "PDC": 8, "XTKG": 7, "CDIO": 6, 
+    "DYTA": 5, "GGLS": 5, "GV": 5, "MGRX": 5, "PFSA": 5, "RUBI": 5, "BHAT": 4, 
+    "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
 }
 
 # 인프라 설정
@@ -17,63 +19,62 @@ SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="NSD PRO: FACT MASTER", layout="wide")
+st.set_page_config(page_title="NSD PRO: PURE STOCK", layout="wide")
 
 # --- 데이터 엔진 ---
-def run_fact_engine():
+def run_pure_stock_engine():
     res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
-    if not res.data: return None, None
+    if not res.data: return None
     
     df = pd.DataFrame(res.data)
     df['recorded_date'] = pd.to_datetime(df['recorded_date'])
     latest_date = df['recorded_date'].max()
     
     # 시간 계산 (3/4 기준)
-    days_diff = (datetime.now().date() - datetime(2026, 3, 4).date()).days
-    current_market = set(df[df['recorded_date'] == latest_date]['symbol'].unique())
+    days_passed = (datetime.now().date() - datetime(2026, 3, 4).date()).days
+    current_market = df[df['recorded_date'] == latest_date]
     
-    active_rows = []
-    # 1단계: 오늘 시장에 있는 놈들 처리
-    for sym in current_market:
-        name = df[df['symbol'] == sym]['security_name'].mode()[0]
+    final_rows = []
+    for _, row in current_market.iterrows():
+        sym = row['symbol']
+        name = row['security_name'].upper()
+        
+        # 🔥 [ETF 필터] 개별 종목이 아닌 것들은 여기서 컷!
+        bad_keywords = ["ETF", "TRUST", "DAILY", "TARGET", "FUND", "UNIT", "YIELDMAX", "DEFIANCE"]
+        if any(keyword in name for keyword in bad_keywords):
+            continue # 이 녀석들은 리스트에 안 보여줍니다.
+        
         if sym in PHOTO_FACTS:
-            days = PHOTO_FACTS[sym] + days_diff
+            days = PHOTO_FACTS[sym] + days_passed
             tag = "✅ 사진실증"
         else:
             days = len(df[df['symbol'] == sym])
-            tag = "✨ 신규진입" if days == 1 else "⏳ DB기록"
+            tag = "✨ 신규진입" if days == 1 else "⏳ 추적중"
             
-        active_rows.append({"티커": sym, "종목명": name, "등재일": days, "상태": tag})
-
-    # 2단계: 사진에는 있었는데 오늘 명단엔 없는 '탈출자' 추출 (사용자님의 핵심 질문)
-    exited_rows = []
-    for sym, base in PHOTO_FACTS.items():
-        if sym not in current_market:
-            exited_rows.append({
-                "티커": sym,
-                "최종등재일": base + (days_diff - 1), # 사라지기 전날까지의 기록
-                "탈출날짜": latest_date.strftime('%m-%d')
-            })
+        final_rows.append({
+            "로고": f"https://www.google.com/s2/favicons?sz=64&domain={sym}.com",
+            "티커": sym,
+            "종목명": name,
+            "등재일": days,
+            "상태": tag
+        })
             
-    return pd.DataFrame(active_rows), pd.DataFrame(exited_rows)
+    return pd.DataFrame(final_rows)
 
 # --- UI ---
-st.title("🛡️ Reg SHO 자립형 실증 시스템")
-search = st.text_input("🔍 티커 검색", "").upper()
+st.title("🛡️ Reg SHO 순수 개별 종목 추적 시스템")
+st.caption("ETF, Trust 등 비주식 종목은 필터링되어 제외되었습니다.")
 
-active_df, exited_df = run_fact_engine()
+search = st.text_input("🔍 개별 종목 티커 검색", "").upper()
+active_df = run_pure_stock_engine()
 
 if active_df is not None:
     if search: active_df = active_df[active_df['티커'].str.contains(search)]
     
-    t1, t2 = st.tabs(["🔥 실시간 등재 목록", "📉 해제/삭제 데이터 추출"])
+    st.dataframe(
+        active_df.sort_values(by="등재일", ascending=False),
+        column_config={"로고": st.column_config.ImageColumn(""), "등재일": st.column_config.NumberColumn("연속 등재일", format="%d 일")},
+        use_container_width=True, hide_index=True
+    )
     
-    with t1:
-        st.dataframe(active_df.sort_values(by="등재일", ascending=False), use_container_width=True, hide_index=True)
-        
-    with t2:
-        if not exited_df.empty:
-            st.warning("⚠️ 사진 데이터 중 다음 종목들이 리스트에서 삭제되었습니다.")
-            st.table(exited_df) # 여기서 데이터 추출 가능
-        else:
-            st.info("현재까지 사진 속 모든 종목이 생존해 있습니다.")
+    st.info(f"📊 현재 {len(active_df)}개의 순수 개별 종목이 추적 중입니다.")
