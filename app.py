@@ -5,12 +5,13 @@ from datetime import datetime
 from supabase import create_client
 
 # ==========================================
-# 1. 기초 설정 및 팩트 데이터
+# 1. 기초 설정 및 인프라
 # ==========================================
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
+TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
+CHAT_ID = "8182795005"
 
-# 실제 등재일 데이터 (추가하고 싶은 종목은 여기에 추가하세요)
 PHOTO_FACTS = {
     "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
     "HOOX": 15, "PBOG": 14, "SMX": 13, "UOKA": 13, "BNAI": 12, "MYCH": 12,
@@ -25,90 +26,94 @@ st.set_page_config(page_title="NSD PRO", layout="wide")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 2. 데이터 엔진 (보안 및 문법 오류 완벽 수정)
+# 2. 영구 보존 엔진 (감시 설정 복구)
+# ==========================================
+if "app_initialized" not in st.session_state:
+    try:
+        res = supabase.table("user_config").select("*").eq("id", 1).execute()
+        if res.data:
+            st.session_state.watch_list = res.data[0].get("watchlist", "")
+            st.session_state.alert_on = res.data[0].get("alert_enabled", True)
+        else:
+            st.session_state.watch_list = ""
+            st.session_state.alert_on = True
+    except:
+        st.session_state.watch_list = ""
+        st.session_state.alert_on = True
+    st.session_state.app_initialized = True
+
+# ==========================================
+# 3. 데이터 엔진 (SEC 이름 + 신규 탐지)
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_sec_names():
-    """SEC 서버에서 공식 기업명 명단을 가져옵니다."""
     try:
         headers = {'User-Agent': 'NSD_PRO_Admin contact@nsdpro.com'}
-        url = "https://www.sec.gov/files/company_tickers.json"
-        res = requests.get(url, headers=headers, timeout=10)
+        res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=headers, timeout=10)
         if res.status_code == 200:
-            data = res.json()
-            return {item['ticker']: item['title'] for item in data.values()}
-    except Exception:
-        pass
+            return {item['ticker']: item['title'] for item in res.json().values()}
+    except: pass
     return {}
 
 def fetch_verified_data():
-    """DB 도장과 명단을 합쳐 최종 등재일을 계산합니다."""
     try:
-        # 공식 이름표 가져오기
         sec_names = get_sec_names()
-        
-        # DB에서 3월 4일 이후의 모든 등재 도장 가져오기
         res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
         db_df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
         
         rows = []
-        processed_tickers = set()
+        processed = set()
         
-        # 1. VIP 명단(PHOTO_FACTS) 처리
-        for ticker, base_day in PHOTO_FACTS.items():
-            bonus_day = 0
-            if not db_df.empty and 'symbol' in db_df.columns:
-                # 해당 티커로 찍힌 고유한 날짜 수 계산
-                bonus_day = len(db_df[db_df['symbol'] == ticker]['recorded_date'].unique())
+        for ticker, base in PHOTO_FACTS.items():
+            bonus = len(db_df[db_df['symbol'] == ticker]['recorded_date'].unique()) if not db_df.empty else 0
+            rows.append({"등재일": base + bonus, "로고": f"https://www.google.com/s2/favicons?sz=128&domain={ticker}.com", "티커": ticker, "종목명": sec_names.get(ticker, ticker)})
+            processed.add(ticker)
             
-            rows.append({
-                "등재일": base_day + bonus_day,
-                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={ticker}.com",
-                "티커": ticker,
-                "종목명": sec_names.get(ticker, ticker)
-            })
-            processed_tickers.add(ticker)
-            
-        # 2. 사냥개가 새로 물어온 신규 종목 처리 (VIP 명단에 없는 것)
-        if not db_df.empty and 'symbol' in db_df.columns:
-            new_tickers = db_df[~db_df['symbol'].isin(processed_tickers)]['symbol'].unique()
-            for ticker in new_tickers:
-                bonus_day = len(db_df[db_df['symbol'] == ticker]['recorded_date'].unique())
-                rows.append({
-                    "등재일": bonus_day,
-                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={ticker}.com",
-                    "티커": ticker,
-                    "종목명": sec_names.get(ticker, ticker)
-                })
-                
+        if not db_df.empty:
+            for ticker in db_df[~db_df['symbol'].isin(processed)]['symbol'].unique():
+                bonus = len(db_df[db_df['symbol'] == ticker]['recorded_date'].unique())
+                rows.append({"등재일": bonus, "로고": f"https://www.google.com/s2/favicons?sz=128&domain={ticker}.com", "티커": ticker, "종목명": sec_names.get(ticker, ticker)})
         return pd.DataFrame(rows)
-    except Exception as e:
-        st.error(f"데이터 엔진 실행 중 오류 발생: {e}")
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 # ==========================================
-# 3. 화면 렌더링 (메인 UI)
+# 4. 화면 UI (감시 설정 및 검색 복구)
 # ==========================================
 st.title("승현쓰껄~ㅋ")
 
-# 데이터 로드
-final_df = fetch_verified_data()
+# --- 🔔 감시 설정 영역 ---
+with st.expander("🔔 실시간 알림 및 감시 종목 설정", expanded=True):
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        current_alert = st.toggle("텔레그램 알림 활성화", value=st.session_state.alert_on)
+        current_watch = st.text_input("감시 티커 입력 (쉼표 구분)", value=st.session_state.watch_list).upper()
+    
+    if current_alert != st.session_state.alert_on or current_watch != st.session_state.watch_list:
+        supabase.table("user_config").upsert({"id": 1, "watchlist": current_watch, "alert_enabled": current_alert}).execute()
+        st.session_state.watch_list = current_watch
+        st.session_state.alert_on = current_alert
+        st.toast("✅ 설정이 서버에 저장되었습니다.")
 
-if not final_df.empty:
-    # 등재일 내림차순 정렬
-    sorted_df = final_df.sort_values(by="등재일", ascending=False)
+    if st.button("🚀 테스트 발송"):
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": f"✅ NSD PRO 연동 정상\n감시 목록: {st.session_state.watch_list}"})
+        st.toast("테스트 발송 성공!")
+
+# --- 🔍 검색 및 데이터 출력 영역 ---
+df = fetch_verified_data()
+search = st.text_input("🔍 목록 내 티커 검색", "").upper()
+
+if not df.empty:
+    if search:
+        df = df[df['티커'].str.contains(search)]
     
     st.dataframe(
-        sorted_df,
+        df.sort_values(by="등재일", ascending=False),
         column_order=["등재일", "로고", "티커", "종목명"],
         column_config={
-            "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
-            "로고": st.column_config.ImageColumn("", width="small"),
+            "등재일": st.column_config.NumberColumn("등재일", format="%d 일"),
+            "로고": st.column_config.ImageColumn(""),
             "티커": st.column_config.TextColumn("티커"),
             "종목명": st.column_config.TextColumn("종목명")
         },
-        use_container_width=True,
-        hide_index=True
+        use_container_width=True, hide_index=True
     )
-else:
-    st.info("데이터를 불러오는 중이거나 표시할 종목이 없습니다.")
