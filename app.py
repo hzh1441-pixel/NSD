@@ -80,48 +80,57 @@ with st.expander("🔔 실시간 알림 및 감시 종목 설정 (영구 저장)
                 st.error("발송 실패")
 
 # ==========================================
-# 🔥 4. 무적의 데이터 엔진 (1,000개 제한 돌파)
+# 🔥 4. 무적의 데이터 엔진 (이름 복구 & 자동 발굴 대응)
 # ==========================================
 def fetch_verified_data():
     try:
-        # [팩트 핵심] 창고(DB)에 찌꺼기를 빼고 "3월 4일 이후 데이터만 줘!"라고 직접 명령
-        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
-        
-        # 가져온 새 도장이 아예 없으면 기본 숫자만 출력
-        if not res.data:
-            rows = []
-            for sym, base_days in PHOTO_FACTS.items():
-                rows.append({
-                    "등재일": base_days,
-                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
-                    "티커": sym,
-                    "종목명": sym + " INC"
-                })
-            return pd.DataFrame(rows)
-
-        # 가져온 새 도장이 있으면 계산 시작
-        df = pd.DataFrame(res.data)
+        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").gt("recorded_date", "2026-03-04").execute()
+        df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
         
         rows = []
+        processed_symbols = set()
+        
+        # 1. VIP 명단 우선 처리 (이름 복구)
         for sym, base_days in PHOTO_FACTS.items():
-            # 심볼(티커)이 일치하는 고유한 날짜의 개수만 센다
-            if 'symbol' in df.columns:
-                added_days = len(df[df['symbol'] == sym]['recorded_date'].unique())
-            else:
-                added_days = 0
-                
-            total_days = base_days + added_days
+            added_days = 0
+            sec_name = sym  # 흉측한 INC 제거
+            
+            if not df.empty and 'symbol' in df.columns:
+                sym_data = df[df['symbol'] == sym]
+                if not sym_data.empty:
+                    added_days = len(sym_data['recorded_date'].unique())
+                    # DB에 진짜 이름이 있으면 그걸 쓰고, 임시 이름이면 티커만 씀
+                    real_name = sym_data.iloc[-1]['security_name']
+                    sec_name = real_name if " INC" not in real_name else sym
             
             rows.append({
-                "등재일": total_days,
+                "등재일": base_days + added_days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
                 "티커": sym,
-                "종목명": sym + " INC"
+                "종목명": sec_name
             })
+            processed_symbols.add(sym)
+            
+        # 2. 🚨 사냥개가 물어온 신규 등재 종목 (예: WHLR) 화면에 자동 추가
+        if not df.empty and 'symbol' in df.columns:
+            new_symbols = df[~df['symbol'].isin(processed_symbols)]['symbol'].unique()
+            for sym in new_symbols:
+                sym_data = df[df['symbol'] == sym]
+                added_days = len(sym_data['recorded_date'].unique())
+                real_name = sym_data.iloc[-1]['security_name']
+                
+                rows.append({
+                    "등재일": added_days, # 신규는 누적 도장 개수가 곧 등재일
+                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                    "티커": sym,
+                    "종목명": real_name if " INC" not in real_name else sym
+                })
+                
         return pd.DataFrame(rows)
     except Exception as e:
         st.error(f"데이터 엔진 오류: {e}")
         return pd.DataFrame()
+
 
 
 # ==========================================
