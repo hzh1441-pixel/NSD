@@ -5,7 +5,7 @@ from supabase import create_client
 import requests
 
 # ==========================================
-# 1. 팩트 데이터 및 인프라 (절대 수정 금지)
+# 1. 팩트 데이터 (기존 데이터 보존 및 WHLR 추가)
 # ==========================================
 PHOTO_FACTS = {
     "AREB": 27, "VEEE": 25, "ELPW": 21, "SVRN": 20, "CISS": 19, "RVSN": 16,
@@ -13,27 +13,91 @@ PHOTO_FACTS = {
     "GFAI": 11, "BRTX": 10, "NCI": 10, "HUBC": 10, "DTST": 10, "HBR": 9,
     "NVDL": 9, "RIME": 9, "SOND": 9, "LFS": 8, "LGHL": 8, "PDC": 8, "KODK": 8,
     "XTKG": 7, "CDIO": 6, "GGLS": 5, "GV": 5, "MGRX": 5, "PFSA": 5, "RUBI": 5,
-    "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2
+    "BHAT": 4, "DUOG": 3, "FFAI": 3, "AMZD": 2, "APPX": 2, "IONZ": 2,
+    "WHLR": 2  # 👈 실제 등재일이 8일이라면 이렇게 적어주세요.
 }
 
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
-TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
-CHAT_ID = "8182795005"
 
 st.set_page_config(page_title="NSD PRO", layout="wide")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 2. 영구 보존 엔진 (앱 구동 시 최초 1회만 실행)
+# 2. 데이터 엔진 (SEC 공식 명칭 실시간 매칭)
 # ==========================================
-if "app_initialized" not in st.session_state:
+@st.cache_data(ttl=86400)
+def get_sec_company_names():
     try:
-        res = supabase.table("user_config").select("*").eq("id", 1).execute()
-        if res.data:
-            st.session_state.watch_list = res.data[0].get("watchlist", "")
-            st.session_state.alert_on = res.data[0].get("alert_enabled", True)
-        else:
+        # SEC 보안 규정 준수: 정식 User-Agent 설정
+        headers = {'User-Agent': 'NSD_PRO_Admin contact@nsdpro.com'}
+        res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=headers, timeout=10)
+        if res.status_code == 200:
+            # {티커: 회사명} 맵 생성
+            return {item['ticker']: item['title'] for item in res.json().values()}
+    except:
+        pass
+    return {}
+
+def fetch_verified_data():
+    try:
+        sec_names = get_sec_company_names()
+        # 3월 4일 이후의 모든 등재 기록 획득
+        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
+        df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        
+        rows = []
+        processed_symbols = set()
+        
+        # 1. VIP 명단 (PHOTO_FACTS) 처리
+        for sym, base_days in PHOTO_FACTS.items():
+            added_days = 0
+            if not df.empty and 'symbol' in df.columns:
+                sym_data = df[df['symbol'] == sym]
+                added_days = len(sym_data['recorded_date'].unique())
+            
+            rows.append({
+                "등재일": base_days + added_days,
+                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                "티커": sym,
+                "종목명": sec_names.get(sym, sym) # 공식명칭 없으면 티커 표시
+            })
+            processed_symbols.add(sym)
+            
+        # 2. 신규 탐지된 종목 (VIP 명단에 없는 것) 처리
+        if not df.empty and 'symbol' in df.columns:
+            new_symbols = df[~df['symbol'].isin(processed_symbols)]['symbol'].unique()
+            for sym in new_symbols:
+                added_days = len(df[df['symbol'] == sym]['recorded_date'].unique())
+                rows.append({
+                    "등재일": added_days,
+                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                    "티커": sym,
+                    "종목명": sec_names.get(sym, sym)
+                })
+        return pd.DataFrame(rows)
+    except:
+        return pd.DataFrame()
+
+# ==========================================
+# 3. UI 렌더링
+# ==========================================
+st.title("승현쓰껄~ㅋ")
+
+active_df = fetch_verified_data()
+if not active_df.empty:
+    st.dataframe(
+        active_df.sort_values(by="등재일", ascending=False),
+        column_order=["등재일", "로고", "티커", "종목명"],
+        column_config={
+            "등재일": st.column_config.NumberColumn("등재일", format="%d 일", width="small"),
+            "로고": st.column_config.ImageColumn("", width="small"),
+            "티커": st.column_config.TextColumn("티커"),
+            "종목명": st.column_config.TextColumn("종목명")
+        }, 
+        use_container_width=True, 
+        hide_index=True
+    )
             st.session_state.watch_list = ""
             st.session_state.alert_on = True
     except Exception:
