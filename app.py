@@ -52,54 +52,39 @@ def get_official_names():
     except: return {}
 
 # ==========================================
-# 3. 데이터 엔진 (안정성 유지 + 이름만 매칭)
+# 3. 데이터 엔진 (삭제 로직 및 거래일 계산 완벽 보정)
 # ==========================================
 def fetch_verified_data():
     try:
-        # 공식 이름 데이터 확보
         names_map = get_official_names()
-        
-        # DB에서 데이터 가져오기 (이름 정보 포함)
         res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").gt("recorded_date", "2026-03-04").execute()
         df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
         
-        rows = []
-        processed_symbols = set()
+        if df.empty: return pd.DataFrame()
+
+        # 🚨 [팩트 체크] 가장 최근 장이 열렸던 날짜(최신 도장 날짜)를 찾습니다.
+        latest_date = df['recorded_date'].max()
+        # 🚨 [팩트 체크] 그 날짜에 명단에 있었던 종목들만 골라냅니다. (여기서 빠진 종목은 사라짐)
+        current_on_list = df[df['recorded_date'] == latest_date]['symbol'].unique()
         
-        # 1. VIP 명단 처리
-        for sym, base_days in PHOTO_FACTS.items():
-            added_days = 0
-            db_name = sym
-            if not df.empty and 'symbol' in df.columns:
-                sym_data = df[df['symbol'] == sym]
-                added_days = len(sym_data['recorded_date'].unique())
-                if not sym_data.empty: db_name = sym_data.iloc[-1]['security_name']
+        rows = []
+        for sym in current_on_list:
+            sym_data = df[df['symbol'] == sym]
+            # 거래일(도장 찍힌 날)만 정확히 카운트
+            added_days = len(sym_data['recorded_date'].unique())
             
-            # 🚨 종목명 결정: SEC 공식명칭 -> DB 저장명칭 -> 티커명
+            # 사냥꾼이 가져온 이름 우선 확보
+            db_name = sym_data.iloc[-1]['security_name'] if 'security_name' in sym_data.columns else sym
+            
+            # 최종 종목명 결정
             display_name = names_map.get(sym, db_name if db_name else sym)
             
             rows.append({
-                "등재일": base_days + added_days,
+                "등재일": PHOTO_FACTS.get(sym, 0) + added_days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
                 "티커": sym,
                 "종목명": display_name
             })
-            processed_symbols.add(sym)
-            
-        # 2. 신규 탐지 종목 처리
-        if not df.empty:
-            new_symbols = df[~df['symbol'].isin(processed_symbols)]['symbol'].unique()
-            for sym in new_symbols:
-                sym_data = df[df['symbol'] == sym]
-                added_days = len(sym_data['recorded_date'].unique())
-                db_name = sym_data.iloc[-1]['security_name']
-                
-                rows.append({
-                    "등재일": added_days,
-                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
-                    "티커": sym,
-                    "종목명": names_map.get(sym, db_name if db_name else sym)
-                })
         return pd.DataFrame(rows)
     except:
         return pd.DataFrame()
