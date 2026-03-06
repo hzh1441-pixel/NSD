@@ -80,39 +80,46 @@ with st.expander("🔔 실시간 알림 및 감시 종목 설정 (영구 저장)
                 st.error("발송 실패")
 
 # ==========================================
-# 4. 데이터 엔진
+# 🔥 4. 무적의 데이터 엔진 (계산식 전면 교체)
 # ==========================================
 def fetch_verified_data():
     try:
-        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").execute()
+        # 창고(DB)에서 기록된 날짜 도장들 긁어오기
+        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").execute()
+        
+        # DB가 텅 비었을 경우 (기본 숫자만 출력)
         if not res.data:
-            return pd.DataFrame()
-            
+            rows = []
+            for sym, base_days in PHOTO_FACTS.items():
+                rows.append({
+                    "등재일": base_days,
+                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                    "티커": sym,
+                    "종목명": sym + " INC"
+                })
+            return pd.DataFrame(rows)
+
+        # DB에 도장이 있다면 진짜 계산 시작
         df = pd.DataFrame(res.data)
         df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
-        latest_date = df['recorded_date'].max()
-        
-        extra_days = len(df[df['recorded_date'] > datetime(2026, 3, 4).date()]['recorded_date'].unique())
-        current_market = df[df['recorded_date'] == latest_date]
         
         rows = []
-        for _, row in current_market.iterrows():
-            sym = row['symbol']
-            name = row['security_name'].upper()
+        for sym, base_days in PHOTO_FACTS.items():
+            # [핵심 팩트] 이 종목 이름으로 DB에 찍힌 서로 다른 날짜 도장의 개수를 셈
+            added_days = len(df[df['symbol'] == sym]['recorded_date'].unique())
             
-            if any(kw in name for kw in ["ETF", "TRUST", "FUND", "FD", "TARGET", "DAILY"]): 
-                continue
-            
-            days = (PHOTO_FACTS[sym] + extra_days) if sym in PHOTO_FACTS else len(df[df['symbol'] == sym])
+            # 최종 등재일 = 원래 갖고 있던 숫자 + DB에 추가된 도장 개수
+            total_days = base_days + added_days
             
             rows.append({
-                "등재일": days,
+                "등재일": total_days,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
                 "티커": sym,
-                "종목명": name
+                "종목명": sym + " INC"
             })
         return pd.DataFrame(rows)
-    except Exception:
+    except Exception as e:
+        st.error(f"데이터 엔진 오류: {e}")
         return pd.DataFrame()
 
 # ==========================================
