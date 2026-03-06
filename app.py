@@ -80,13 +80,14 @@ with st.expander("🔔 실시간 알림 및 감시 종목 설정 (영구 저장)
                 st.error("발송 실패")
 
 # ==========================================
-# ==========================================
-# 🔥 4. 무적의 데이터 엔진 (과거 찌꺼기 필터링 추가)
+# 🔥 4. 무적의 데이터 엔진 (1,000개 제한 돌파)
 # ==========================================
 def fetch_verified_data():
     try:
-        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").execute()
+        # [팩트 핵심] 창고(DB)에 찌꺼기를 빼고 "3월 4일 이후 데이터만 줘!"라고 직접 명령
+        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
         
+        # 가져온 새 도장이 아예 없으면 기본 숫자만 출력
         if not res.data:
             rows = []
             for sym, base_days in PHOTO_FACTS.items():
@@ -98,18 +99,17 @@ def fetch_verified_data():
                 })
             return pd.DataFrame(rows)
 
+        # 가져온 새 도장이 있으면 계산 시작
         df = pd.DataFrame(res.data)
-        df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
-        
-        # 🚨 [팩트 체크] 기준일(3월 4일) 이후의 진짜 최신 데이터만 남기고 옛날 찌꺼기 삭제
-        baseline_date = datetime(2026, 3, 4).date()
-        recent_df = df[df['recorded_date'] > baseline_date]
         
         rows = []
         for sym, base_days in PHOTO_FACTS.items():
-            # 필터링된 진짜 최신 도장 개수만 셈
-            added_days = len(recent_df[recent_df['symbol'] == sym]['recorded_date'].unique())
-            
+            # 심볼(티커)이 일치하는 고유한 날짜의 개수만 센다
+            if 'symbol' in df.columns:
+                added_days = len(df[df['symbol'] == sym]['recorded_date'].unique())
+            else:
+                added_days = 0
+                
             total_days = base_days + added_days
             
             rows.append({
