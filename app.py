@@ -80,14 +80,13 @@ with st.expander("🔔 실시간 알림 및 감시 종목 설정 (영구 저장)
                 st.error("발송 실패")
 
 # ==========================================
-# 🔥 4. 무적의 데이터 엔진 (계산식 전면 교체)
+# ==========================================
+# 🔥 4. 무적의 데이터 엔진 (과거 찌꺼기 필터링 추가)
 # ==========================================
 def fetch_verified_data():
     try:
-        # 창고(DB)에서 기록된 날짜 도장들 긁어오기
         res = supabase.table("reg_sho_logs").select("symbol, recorded_date").execute()
         
-        # DB가 텅 비었을 경우 (기본 숫자만 출력)
         if not res.data:
             rows = []
             for sym, base_days in PHOTO_FACTS.items():
@@ -99,16 +98,18 @@ def fetch_verified_data():
                 })
             return pd.DataFrame(rows)
 
-        # DB에 도장이 있다면 진짜 계산 시작
         df = pd.DataFrame(res.data)
         df['recorded_date'] = pd.to_datetime(df['recorded_date']).dt.date
         
+        # 🚨 [팩트 체크] 기준일(3월 4일) 이후의 진짜 최신 데이터만 남기고 옛날 찌꺼기 삭제
+        baseline_date = datetime(2026, 3, 4).date()
+        recent_df = df[df['recorded_date'] > baseline_date]
+        
         rows = []
         for sym, base_days in PHOTO_FACTS.items():
-            # [핵심 팩트] 이 종목 이름으로 DB에 찍힌 서로 다른 날짜 도장의 개수를 셈
-            added_days = len(df[df['symbol'] == sym]['recorded_date'].unique())
+            # 필터링된 진짜 최신 도장 개수만 셈
+            added_days = len(recent_df[recent_df['symbol'] == sym]['recorded_date'].unique())
             
-            # 최종 등재일 = 원래 갖고 있던 숫자 + DB에 추가된 도장 개수
             total_days = base_days + added_days
             
             rows.append({
@@ -121,6 +122,7 @@ def fetch_verified_data():
     except Exception as e:
         st.error(f"데이터 엔진 오류: {e}")
         return pd.DataFrame()
+
 
 # ==========================================
 # 5. 메인 리스트 렌더링
