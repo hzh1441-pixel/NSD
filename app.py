@@ -58,23 +58,35 @@ def get_sec_names():
 def fetch_verified_data():
     try:
         sec_names = get_sec_names()
+        # 1. 일단 3월 4일 이후 모든 데이터를 가져옵니다.
         res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
-        db_df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        all_df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        
+        if all_df.empty: return pd.DataFrame()
+
+        # 🚨 [중요 팩트] 가장 최근에 도장이 찍힌 날짜(오늘)가 언제인지 찾습니다.
+        latest_date = all_df['recorded_date'].max()
+        
+        # 🚨 [중요 팩트] 오늘 자 명단에 이름이 있는 종목만 골라냅니다. (빠진 종목은 여기서 제외됨)
+        current_symbols = all_df[all_df['recorded_date'] == latest_date]['symbol'].unique()
         
         rows = []
-        processed = set()
-        
-        for ticker, base in PHOTO_FACTS.items():
-            bonus = len(db_df[db_df['symbol'] == ticker]['recorded_date'].unique()) if not db_df.empty else 0
-            rows.append({"등재일": base + bonus, "로고": f"https://www.google.com/s2/favicons?sz=128&domain={ticker}.com", "티커": ticker, "종목명": sec_names.get(ticker, ticker)})
-            processed.add(ticker)
+        for sym in current_symbols:
+            # 해당 종목의 누적 등재일 계산
+            bonus_day = len(all_df[all_df['symbol'] == sym]['recorded_date'].unique())
+            base_day = PHOTO_FACTS.get(sym, 0) # VIP 명단에 없으면 기본값 0
             
-        if not db_df.empty:
-            for ticker in db_df[~db_df['symbol'].isin(processed)]['symbol'].unique():
-                bonus = len(db_df[db_df['symbol'] == ticker]['recorded_date'].unique())
-                rows.append({"등재일": bonus, "로고": f"https://www.google.com/s2/favicons?sz=128&domain={ticker}.com", "티커": ticker, "종목명": sec_names.get(ticker, ticker)})
+            rows.append({
+                "등재일": base_day + bonus_day,
+                "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
+                "티커": sym,
+                "종목명": sec_names.get(sym, sym)
+            })
         return pd.DataFrame(rows)
-    except: return pd.DataFrame()
+    except Exception as e:
+        st.error(f"엔진 오류: {e}")
+        return pd.DataFrame()
+
 
 # ==========================================
 # 4. 화면 UI (감시 설정 및 검색 복구)
