@@ -43,43 +43,37 @@ if "app_initialized" not in st.session_state:
     st.session_state.app_initialized = True
 
 # ==========================================
-# 3. 데이터 엔진 (안정성 최우선 버전)
+# 3. 데이터 엔진 (나스닥 실시간 이름 반영)
 # ==========================================
 def fetch_verified_data():
     try:
-        # DB에서 최신 데이터 가져오기
-        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
-        df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        # DB에서 이름(security_name)을 포함해 모든 데이터를 가져옵니다.
+        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").gt("recorded_date", "2026-03-04").execute()
+        all_df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+        
+        if all_df.empty:
+            return pd.DataFrame()
+
+        # 가장 최신 날짜 데이터만 필터링 (등재 제외 종목 자동 삭제 로직)
+        latest_date = all_df['recorded_date'].max()
+        current_symbols_data = all_df[all_df['recorded_date'] == latest_date]
         
         rows = []
-        processed_symbols = set()
-        
-        # 1. VIP 명단 처리
-        for sym, base_days in PHOTO_FACTS.items():
-            added_days = 0
-            if not df.empty and 'symbol' in df.columns:
-                sym_data = df[df['symbol'] == sym]
-                added_days = len(sym_data['recorded_date'].unique())
+        for _, entry in current_symbols_data.drop_duplicates('symbol').iterrows():
+            sym = entry['symbol']
+            # 일꾼이 나스닥에서 가져온 진짜 이름 사용
+            real_name = entry['security_name'] if entry['security_name'] else sym
+            
+            # 누적 등재일 계산
+            bonus_day = len(all_df[all_df['symbol'] == sym]['recorded_date'].unique())
+            base_day = PHOTO_FACTS.get(sym, 0)
             
             rows.append({
-                "등재일": base_days + added_days,
+                "등재일": base_day + bonus_day,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
                 "티커": sym,
-                "종목명": sym # 이름은 티커로 통일하여 에러 방지
+                "종목명": real_name
             })
-            processed_symbols.add(sym)
-            
-        # 2. 신규 탐지 종목 처리
-        if not df.empty:
-            new_symbols = df[~df['symbol'].isin(processed_symbols)]['symbol'].unique()
-            for sym in new_symbols:
-                added_days = len(df[df['symbol'] == sym]['recorded_date'].unique())
-                rows.append({
-                    "등재일": added_days,
-                    "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
-                    "티커": sym,
-                    "종목명": sym
-                })
         return pd.DataFrame(rows)
     except:
         return pd.DataFrame()
@@ -90,7 +84,7 @@ def fetch_verified_data():
 st.title("승현쓰껄~ㅋ")
 
 # --- 🔔 감시 설정 영역 ---
-with st.expander("🔔 실시간 알림 및 감시 종목 설정", expanded=True):
+with st.expander("🔔 실시간 알림 및 감시 종목 설정", expanded=False):
     col_a, col_b = st.columns([2, 1])
     with col_a:
         c_alert = st.toggle("텔레그램 알림 활성화", value=st.session_state.alert_on)
