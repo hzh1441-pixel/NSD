@@ -26,24 +26,7 @@ st.set_page_config(page_title="NSD PRO", layout="wide")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 2. 영구 보존 엔진 (감시 설정 복구)
-# ==========================================
-if "app_initialized" not in st.session_state:
-    try:
-        res = supabase.table("user_config").select("*").eq("id", 1).execute()
-        if res.data:
-            st.session_state.watch_list = res.data[0].get("watchlist", "")
-            st.session_state.alert_on = res.data[0].get("alert_enabled", True)
-        else:
-            st.session_state.watch_list = ""
-            st.session_state.alert_on = True
-    except:
-        st.session_state.watch_list = ""
-        st.session_state.alert_on = True
-    st.session_state.app_initialized = True
-
-# ==========================================
-# 3. 데이터 엔진 (SEC 이름 + 신규 탐지)
+# 2. 데이터 엔진 (종목명 오류 100% 해결 버전)
 # ==========================================
 @st.cache_data(ttl=86400)
 def get_sec_names():
@@ -58,66 +41,57 @@ def get_sec_names():
 def fetch_verified_data():
     try:
         sec_names = get_sec_names()
-        # 1. 일단 3월 4일 이후 모든 데이터를 가져옵니다.
-        res = supabase.table("reg_sho_logs").select("symbol, recorded_date").gt("recorded_date", "2026-03-04").execute()
+        # 창고(DB)에서 이름(security_name)까지 같이 가져옵니다.
+        res = supabase.table("reg_sho_logs").select("symbol, security_name, recorded_date").gt("recorded_date", "2026-03-04").execute()
         all_df = pd.DataFrame(res.data) if res.data else pd.DataFrame()
         
         if all_df.empty: return pd.DataFrame()
 
-        # 🚨 [중요 팩트] 가장 최근에 도장이 찍힌 날짜(오늘)가 언제인지 찾습니다.
         latest_date = all_df['recorded_date'].max()
-        
-        # 🚨 [중요 팩트] 오늘 자 명단에 이름이 있는 종목만 골라냅니다. (빠진 종목은 여기서 제외됨)
-        current_symbols = all_df[all_df['recorded_date'] == latest_date]['symbol'].unique()
+        current_data = all_df[all_df['recorded_date'] == latest_date]
         
         rows = []
-        for sym in current_symbols:
-            # 해당 종목의 누적 등재일 계산
+        for _, entry in current_data.drop_duplicates('symbol').iterrows():
+            sym = entry['symbol']
+            db_name = entry['security_name'] # 창고에 저장된 사냥꾼표 진짜 이름
+            
             bonus_day = len(all_df[all_df['symbol'] == sym]['recorded_date'].unique())
-            base_day = PHOTO_FACTS.get(sym, 0) # VIP 명단에 없으면 기본값 0
+            base_day = PHOTO_FACTS.get(sym, 0)
+            
+            # 우선순위: SEC 공식명칭 -> 창고 저장 명칭 -> 티커명
+            display_name = sec_names.get(sym, db_name if db_name else sym)
             
             rows.append({
                 "등재일": base_day + bonus_day,
                 "로고": f"https://www.google.com/s2/favicons?sz=128&domain={sym}.com",
                 "티커": sym,
-                "종목명": sec_names.get(sym, sym)
+                "종목명": display_name
             })
         return pd.DataFrame(rows)
-    except Exception as e:
-        st.error(f"엔진 오류: {e}")
-        return pd.DataFrame()
-
+    except: return pd.DataFrame()
 
 # ==========================================
-# 4. 화면 UI (감시 설정 및 검색 복구)
+# 3. 화면 UI (감시 및 검색 기능 포함)
 # ==========================================
 st.title("승현쓰껄~ㅋ")
 
-# --- 🔔 감시 설정 영역 ---
-with st.expander("🔔 실시간 알림 및 감시 종목 설정", expanded=True):
+with st.expander("🔔 실시간 알림 및 감시 종목 설정", expanded=False):
     col_a, col_b = st.columns([2, 1])
     with col_a:
-        current_alert = st.toggle("텔레그램 알림 활성화", value=st.session_state.alert_on)
-        current_watch = st.text_input("감시 티커 입력 (쉼표 구분)", value=st.session_state.watch_list).upper()
+        alert_on = st.toggle("텔레그램 알림 활성화", value=st.session_state.get('alert_on', True))
+        watch_list = st.text_input("감시 티커 입력 (쉼표 구분)", value=st.session_state.get('watch_list', "")).upper()
     
-    if current_alert != st.session_state.alert_on or current_watch != st.session_state.watch_list:
-        supabase.table("user_config").upsert({"id": 1, "watchlist": current_watch, "alert_enabled": current_alert}).execute()
-        st.session_state.watch_list = current_watch
-        st.session_state.alert_on = current_alert
-        st.toast("✅ 설정이 서버에 저장되었습니다.")
+    if st.button("💾 설정 저장"):
+        supabase.table("user_config").upsert({"id": 1, "watchlist": watch_list, "alert_enabled": alert_on}).execute()
+        st.session_state.watch_list = watch_list
+        st.session_state.alert_on = alert_on
+        st.success("설정이 저장되었습니다.")
 
-    if st.button("🚀 테스트 발송"):
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": f"✅ NSD PRO 연동 정상\n감시 목록: {st.session_state.watch_list}"})
-        st.toast("테스트 발송 성공!")
-
-# --- 🔍 검색 및 데이터 출력 영역 ---
 df = fetch_verified_data()
 search = st.text_input("🔍 목록 내 티커 검색", "").upper()
 
 if not df.empty:
-    if search:
-        df = df[df['티커'].str.contains(search)]
-    
+    if search: df = df[df['티커'].str.contains(search)]
     st.dataframe(
         df.sort_values(by="등재일", ascending=False),
         column_order=["등재일", "로고", "티커", "종목명"],
