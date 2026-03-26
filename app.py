@@ -1,59 +1,105 @@
-import streamlit as st
 import requests
+import time
+import datetime
+import os
+import xml.etree.ElementTree as ET
 from supabase import create_client
 
-# 1. 고정 설정 (수정 불필요)
+# --- [환경 설정: 건드릴 필요 없음] ---
+TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
+CHAT_ID = "8182795005"
+DB_FILE = "sent_filings.txt"
+SEC_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&owner=include&output=atom"
+HEADERS = {'User-Agent': 'NSD_PRO_Bot (my-email@example.com)'} 
+
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
-TELEGRAM_TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
-CHAT_ID = "8182795005"
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.set_page_config(page_title="NSD PRO 공시 감시 센터", page_icon="🚨")
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML", "disable_web_page_preview": True}
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except:
+        pass
 
-# 연결 함수
-@st.cache_resource
-def init_connection():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+def get_watchlist_from_streamlit():
+    """스트림릿에서 저장한 user_config 테이블의 watchlist 컬럼을 그대로 읽어옵니다."""
+    try:
+        res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
+        if res.data and 'watchlist' in res.data[0]:
+            tickers_str = res.data[0]['watchlist']
+            if tickers_str:
+                return [t.strip().upper() for t in tickers_str.split(',') if t.strip()]
+        return []
+    except Exception as e:
+        print(f"스트림릿 설정 연동 대기 중... ({e})")
+        return []
 
-try:
-    supabase = init_connection()
-    
-    st.title("🚨 NSD PRO 공시 감시 센터")
-    st.success("✅ 시스템 정상 작동 중 (공시 감시 전용)")
+def check_sec():
+    if not os.path.exists(DB_FILE):
+        open(DB_FILE, 'w').close()
 
-    # --- [섹션 1: 텔레그램 연결 테스트] ---
-    st.divider()
-    st.subheader("🧪 시스템 테스트")
-    if st.button("🔔 텔레그램으로 테스트 메시지 보내기"):
-        test_msg = "✅ NSD PRO 스트림릿 테스트 메시지입니다. 연결이 아주 좋습니다!"
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        res = requests.post(url, data={"chat_id": CHAT_ID, "text": test_msg})
-        if res.status_code == 200:
-            st.toast("테스트 메시지를 보냈습니다! 텔레그램을 확인하세요.")
-        else:
-            st.error("테스트 실패. 토큰이나 챗ID를 확인해주세요.")
+    # 최초 실행 시 스트림릿 연동 상태 확인 메시지 발송
+    try:
+        initial_list = get_watchlist_from_streamlit()
+        current_tickers = ", ".join(initial_list) if initial_list else "등록된 종목 없음"
+        send_telegram(f"✅ <b>[NSD PRO] 시스템 가동 준비 완료</b>\n현재 스트림릿에 설정된 감시 종목: {current_tickers}")
+    except:
+        pass
 
-    # --- [섹션 2: 감시 리스트 관리] ---
-    st.divider()
-    st.subheader("⚙️ 감시 리스트 설정")
-    res = supabase.table("user_config").select("watchlist").eq("id", 1).execute()
-    
-    if res.data:
-        current_watchlist = res.data[0]['watchlist']
-        new_watchlist = st.text_input("감시할 티커 (쉼표로 구분)", value=current_watchlist)
+    while True:
+        now = datetime.datetime.now()
         
-        if st.button("💾 설정 저장"):
-            supabase.table("user_config").update({"watchlist": new_watchlist.upper()}).eq("id", 1).execute()
-            st.success("새로운 리스트가 저장되었습니다. 일꾼이 곧 반영합니다.")
-            st.rerun()
+        # 한국 시간 09:00 생존 보고
+        if now.hour == 0 and now.minute == 0 and now.second < 25:
+            current_list = get_watchlist_from_streamlit()
+            current_tickers = ", ".join(current_list) if current_list else "없음"
+            send_telegram(f"🚀 <b>[NSD PRO]</b> 시스템 정상 가동 중 (정기 보고)\n감시 중: {current_tickers}")
+            time.sleep(30)
+
+        try:
+            # 1. 20초마다 스트림릿의 최신 설정을 무조건 새로 읽어옴
+            watchlist = get_watchlist_from_streamlit()
             
-        st.info(f"📋 **현재 감시 중:** {new_watchlist.upper()}")
-    else:
-        st.warning("데이터베이스에서 설정값을 읽어올 수 없습니다.")
+            if not watchlist:
+                time.sleep(20)
+                continue # 스트림릿에 입력한 종목이 없으면 대기
 
-except Exception as e:
-    st.error(f"⚠️ 연결 오류 발생: {e}")
-    st.write("Supabase 프로젝트가 'Active' 상태인지 확인하세요.")
+            # 2. SEC 공시 가져오기
+            response = requests.get(SEC_URL, headers=HEADERS, timeout=15)
+            if response.status_code == 200:
+                root = ET.fromstring(response.content)
+                ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                
+                for entry in root.findall('atom:entry', ns):
+                    title_el = entry.find('atom:title', ns)
+                    if title_el is None: continue
+                    title = title_el.text
+                    
+                    link_el = entry.find('atom:link', ns)
+                    link = link_el.attrib['href'] if link_el is not None else SEC_URL
+                    
+                    id_el = entry.find('atom:id', ns)
+                    if id_el is None: continue
+                    filing_id = id_el.text
+                    
+                    with open(DB_FILE, 'r') as f:
+                        sent_ids = f.read().splitlines()
+                    
+                    if filing_id not in sent_ids:
+                        for stock in watchlist:
+                            if stock in title.upper():
+                                msg = f"🚨 <b>[SEC 신규 공시 발견!]</b>\n\n📌 <b>종목:</b> {stock}\n📄 <b>종류:</b> {title.split(' - ')[0]}\n🔗 <a href='{link}'>문서 바로보기</a>"
+                                send_telegram(msg)
+                                with open(DB_FILE, 'a') as f:
+                                    f.write(filing_id + "\n")
+                                break
+        except Exception as e:
+            pass # 에러가 나도 절대 멈추지 않고 다음 20초 뒤에 재시도
+        
+        time.sleep(20)
 
-st.divider()
-st.caption("참고: 등재일 데이터는 제거되었습니다. 이제 오직 공시에만 집중합니다.")
+if __name__ == "__main__":
+    check_sec()
