@@ -6,47 +6,36 @@ import pandas as pd
 # --- [1. 스타일 및 세련된 레이아웃 설정] ---
 st.set_page_config(page_title="NSD PRO MASTER", layout="wide")
 
-# 래빗스탁 스타일 커스텀 CSS (카드형 배너 디자인)
+# 래빗스탁 스타일 커스텀 CSS (클릭 가능한 카드 버튼 디자인)
 st.markdown("""
     <style>
-    /* 전체 배경 및 폰트 */
     .stApp { background-color: #0E1117; color: #FFFFFF; }
     
-    /* 카드형 배너 스타일 */
-    .banner-container {
+    /* 버튼을 카드/배너처럼 보이게 만드는 스타일 */
+    div.stButton > button {
         background-color: #161B22;
         border: 1px solid #30363D;
         border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 20px;
+        padding: 40px 20px;
+        width: 100%;
+        height: 180px;
         transition: 0.2s;
+        display: block;
     }
-    .banner-container:hover {
+    div.stButton > button:hover {
         border-color: #58A6FF;
         background-color: #1C2128;
+        transform: translateY(-5px);
     }
-    .banner-title {
-        font-size: 18px;
-        font-weight: bold;
-        color: #58A6FF;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .banner-status {
-        font-size: 12px;
-        padding: 2px 8px;
-        border-radius: 20px;
-        background-color: #238636;
-        color: white;
+    /* 버튼 안의 텍스트 스타일 */
+    div.stButton > button p {
+        font-size: 20px !important;
+        font-weight: bold !important;
+        color: #58A6FF !important;
     }
     
-    /* 사이드바 스타일 */
-    section[data-testid="stSidebar"] { background-color: #0D1117; border-right: 1px solid #30363D; }
-    
-    /* 에러 났던 스페이서 대체용 */
-    .spacer { margin-bottom: 30px; }
+    /* 상단 배너 제목 스타일 */
+    .page-title { font-size: 28px; font-weight: bold; color: #FFFFFF; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,88 +46,78 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
-# --- [2. 데이터 로드 로직] ---
+# --- [2. 페이지 이동 로직] ---
+if 'page' not in st.session_state:
+    st.session_state.page = 'home'
+
+def go_to(page_name):
+    st.session_state.page = page_name
+    st.rerun()
+
 def load_watchlist():
     try:
         res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
         return res.data[0].get('watchlist', '') if res.data else ""
     except: return ""
 
-# --- [3. 사이드바 내비게이션] ---
-with st.sidebar:
-    st.markdown("<h2 style='color: #58A6FF;'>🛡️ NSD PRO</h2>", unsafe_allow_html=True)
-    st.caption("실시간 나스닥 터미널 v2.0")
-    st.markdown('<div class="spacer"></div>', unsafe_allow_html=True)
-    
-    menu = st.radio(
-        "카테고리 선택",
-        ["🏠 대시보드 홈", "📡 SEC 공시 센터", "⚠️ Reg Sho 분석", "🔍 종목 퀵 검색", "⚙️ 시스템 설정"],
-        index=0
-    )
+# --- [3. 화면 렌더링] ---
 
-# --- [4. 메인 화면 구성] ---
-
+# 현재 감시 종목 데이터 미리 로드
 current_watchlist = load_watchlist()
-tickers = [t.strip().upper() for t in current_watchlist.split(',') if t.strip()]
 
-if menu == "🏠 대시보드 홈":
-    st.title("📊 실시간 모니터링 현황")
+# A. 메인 홈 화면 (4개 배너 그리드)
+if st.session_state.page == 'home':
+    st.markdown('<div class="page-title">🛡️ NSD PRO 마스터 터미널</div>', unsafe_allow_html=True)
+    st.write("서비스를 선택하려면 아래 배너를 클릭하세요.")
     
-    # 상단 요약 배너 4개 그리드 배치
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
+    col3, col4 = st.columns(2)
     
     with col1:
-        st.markdown(f'''<div class="banner-container">
-            <div class="banner-title">📡 SEC 감시 <span class="banner-status">ON</span></div>
-            <div style="font-size: 24px; font-weight: bold;">{len(tickers)} 종목</div>
-        </div>''', unsafe_allow_html=True)
-
+        if st.button("📡\nSEC 실시간 공시 센터"):
+            go_to('sec')
     with col2:
-        st.markdown(f'''<div class="banner-container">
-            <div class="banner-title" style="color: #F2CC60;">⚠️ Reg Sho</div>
-            <div style="font-size: 24px; font-weight: bold;">분석 중</div>
-        </div>''', unsafe_allow_html=True)
-
+        if st.button("⚠️\nREG SHO 분석 (준비중)"):
+            go_to('regsho')
     with col3:
-        st.markdown(f'''<div class="banner-container">
-            <div class="banner-title" style="color: #79C0FF;">🔍 FTD 데이터</div>
-            <div style="font-size: 24px; font-weight: bold;">연결됨</div>
-        </div>''', unsafe_allow_html=True)
-
+        if st.button("🔍\n종목 퀵 시세 검색 (준비중)"):
+            go_to('search')
     with col4:
-        st.markdown(f'''<div class="banner-container">
-            <div class="banner-title" style="color: #FF7B72;">⚙️ 서버 상태</div>
-            <div style="font-size: 24px; font-weight: bold;">정상</div>
-        </div>''', unsafe_allow_html=True)
+        if st.button("⚙️\n시스템 설정 및 테스트"):
+            go_to('settings')
 
-    # 중앙 데이터 배너
-    st.markdown('<div class="banner-container"><div class="banner-title">📋 현재 실시간 감시 리스트</div>', unsafe_allow_html=True)
-    if tickers:
-        st.write(", ".join(tickers))
-    else:
-        st.write("감시 중인 종목이 없습니다.")
-    st.markdown('</div>', unsafe_allow_html=True)
+# B. SEC 실시간 공시 화면 (실제 작동)
+elif st.session_state.page == 'sec':
+    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
+    st.title("📡 SEC 실시간 공시 센터")
+    st.markdown("---")
+    st.subheader("현재 실시간 감시 중인 종목")
+    st.info(f"**{current_watchlist if current_watchlist else '없음'}**")
+    st.write("파이썬애니웨어 엔진이 위 종목들을 20초마다 확인하며 새 공시 발견 시 텔레그램을 보냅니다.")
 
-elif menu == "⚙️ 시스템 설정":
-    st.title("⚙️ 시스템 설정")
+# C. 시스템 설정 및 테스트 (실제 작동)
+elif st.session_state.page == 'settings':
+    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
+    st.title("⚙️ 시스템 설정 및 컨트롤")
+    st.markdown("---")
     
-    with st.container():
-        st.markdown('<div class="banner-container">', unsafe_allow_html=True)
-        st.subheader("🛠️ 감시 종목 업데이트")
-        new_tickers = st.text_area("티커를 입력하세요 (쉼표 구분)", value=current_watchlist, height=100)
-        if st.button("💾 설정 저장 및 동기화"):
-            supabase.table('user_config').upsert({"id": 1, "watchlist": new_tickers}).execute()
-            st.success("✅ 저장되었습니다.")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+    # 종목 수정 섹션
+    st.subheader("🛠️ 감시 종목 업데이트")
+    new_tickers = st.text_area("티커를 입력하세요 (쉼표 구분)", value=current_watchlist, height=100)
+    if st.button("💾 설정 저장 (DB 동기화)"):
+        supabase.table('user_config').upsert({"id": 1, "watchlist": new_tickers}).execute()
+        st.success("✅ 성공적으로 저장되었습니다! 엔진이 새 목록을 즉시 감시합니다.")
+        st.rerun()
+        
+    st.markdown("---")
+    # 테스트 섹션
+    st.subheader("🔔 연결 상태 테스트")
+    if st.button("테스트 알림 발송"):
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🔔 조종석 연동 확인 성공!"})
+        st.success("텔레그램 메시지를 확인하세요.")
 
-    with st.container():
-        st.markdown('<div class="banner-container">', unsafe_allow_html=True)
-        st.subheader("🔔 텔레그램 테스트")
-        if st.button("테스트 메시지 발송"):
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🔔 연결 확인 성공!"})
-        st.markdown('</div>', unsafe_allow_html=True)
-
-else:
-    st.title(menu)
-    st.info(f"현재 '{menu}' 기능의 세부 데이터 연동을 준비 중입니다.")
+# D. 나머지 준비중인 화면들
+elif st.session_state.page in ['regsho', 'search']:
+    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
+    st.title("🚧 기능 준비 중")
+    st.error(f"선택하신 '{st.session_state.page}' 기능은 현재 데이터 연동 작업 중입니다.")
