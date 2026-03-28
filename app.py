@@ -1,79 +1,98 @@
 import streamlit as st
 from supabase import create_client
-import requests
 import pandas as pd
+import requests
 
-# --- [1. 기본 설정 및 보안 연결] ---
-st.set_page_config(page_title="NSD PRO Dashboard", layout="wide") 
+# --- [1. 스타일 및 설정] ---
+st.set_page_config(page_title="NSD PRO MASTER", layout="wide")
 
+# 배너 스타일을 위한 커스텀 CSS
+st.markdown("""
+    <style>
+    .banner-card {
+        background-color: #1E1E1E;
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #00FFAA;
+        margin-bottom: 20px;
+    }
+    .banner-title {
+        color: #00FFAA;
+        font-size: 20px;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# DB 연결
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
 TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
-# --- [2. 핵심 기능 함수 (기존 로직 동일)] ---
-def send_test_telegram():
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": "🔔 <b>[NSD PRO]</b> 시스템 연동 테스트 성공!", "parse_mode": "HTML"}
-    try:
-        requests.post(url, json=payload, timeout=5)
-        st.success("✅ 텔레그램 메시지가 발송되었습니다.")
-    except Exception as e:
-        st.error(f"❌ 발송 실패: {e}")
+# --- [2. 핵심 로직] ---
+def load_data():
+    res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
+    return res.data[0].get('watchlist', '') if res.data else ""
 
-def load_settings():
-    try:
-        res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
-        return res.data[0].get('watchlist', '') if res.data else ""
-    except: return ""
+# --- [3. 메인 배너 레이아웃] ---
 
-# --- [3. UI 레이아웃 설계] ---
-st.title("💹 NSD PRO : 실시간 나스닥 터미널")
-
-# 상단 종목 카드 (현재 감시 중인 종목 시각화)
-watchlist_str = load_settings()
-tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
-
-if tickers:
-    cols = st.columns(len(tickers))
-    for i, ticker in enumerate(tickers):
-        with cols[i]:
-            st.metric(label="Monitoring", value=ticker, delta="SEC 24H")
-else:
-    st.info("현재 감시 중인 종목이 없습니다. [설정] 탭에서 종목을 추가하세요.")
-
+# 메인 타이틀
+st.title("🛡️ NSD PRO : REAL-TIME TERMINAL")
 st.divider()
 
-# 메인 기능 탭 분할 (보기 좋게 정리)
-tab1, tab2, tab3 = st.tabs(["📋 감시 리스트 설정", "🧪 시스템 테스트", "📊 데이터 분석(예정)"])
+# 좌측/우측 정밀 배너 배치
+left_col, right_col = st.columns([2, 1])
 
-with tab1:
-    st.subheader("⚙️ 종목 업데이트")
-    st.write("감시할 티커를 입력하세요 (쉼표로 구분)")
-    # 입력창
-    new_tickers = st.text_input("Ticker Input", value=watchlist_str, label_visibility="collapsed")
+with left_col:
+    # --- 배너 1: SEC 공시 모니터링 ---
+    st.markdown('<div class="banner-card"><div class="banner-title">📡 [BANNER 01] SEC REAL-TIME MONITORING</div>', unsafe_allow_html=True)
+    watchlist_str = load_data()
+    tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
     
-    if st.button("💾 설정 저장 및 엔진 동기화"):
-        try:
-            # 기존과 동일한 저장 로직 (id=1 고정)
-            supabase.table('user_config').upsert({"id": 1, "watchlist": new_tickers}).execute()
-            st.success("✅ 성공적으로 저장되었습니다! 파이썬 엔진이 즉시 새 목록을 감시합니다.")
-            st.rerun() # 화면 새로고침해서 상단 카드 업데이트
-        except Exception as e:
-            st.error(f"❌ 저장 실패: {e}")
+    c1, c2, c3 = st.columns(3)
+    for i, t in enumerate(tickers[:3]): # 상위 3개 종목 요약 표시
+        with [c1, c2, c3][i]:
+            st.metric(label=f"TARGET", value=t, delta="ACTIVE")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-with tab2:
-    st.subheader("📡 연결 상태 확인")
-    st.write("텔레그램 알림이 정상적으로 오는지 확인합니다.")
-    if st.button("🔔 텔레그램 테스트 알림 보내기"):
-        send_test_telegram()
+    # --- 배너 2: REG SHO 추적기 ---
+    st.markdown('<div class="banner-card"><div class="banner-title">⚠️ [BANNER 02] REG SHO THRESHOLD TRACKER</div>', unsafe_allow_html=True)
+    # 실제 데이터 연동 전 시각화 예시
+    reg_data = pd.DataFrame({
+        "Ticker": tickers if tickers else ["-"],
+        "Status": ["ON LIST" if "BNAI" in t or "EMPD" in t else "CLEAN" for t in (tickers if tickers else ["-"])],
+        "Consecutive Days": ["8 Days" if "BNAI" in t else "-" for t in (tickers if tickers else ["-"])]
+    })
+    st.table(reg_data)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-with tab3:
-    st.write("📈 **Reg Sho 및 FTD 분석 데이터**")
-    st.info("이곳에 나중에 Reg Sho 일수와 차트가 들어올 예정입니다.")
+with right_col:
+    # --- 배너 3: 종목 시세 검색 ---
+    st.markdown('<div class="banner-card" style="border-left-color: #FFCC00;"><div class="banner-title" style="color: #FFCC00;">🔍 [BANNER 03] QUICK PRICE SEARCH</div>', unsafe_allow_html=True)
+    search_q = st.text_input("티커 입력 (예: AAPL)", "").upper()
+    if search_q:
+        st.write(f"**{search_q}** 시세 데이터 연결 중...")
+        st.info("Yahoo Finance API 연동 시 실시간 차트가 이곳에 표시됩니다.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# 하단 상태바
-st.divider()
-st.caption(f"시스템 상태: 정상 가동 중 | 마지막 동기화: {pd.Timestamp.now().strftime('%H:%M:%S')}")
+    # --- 배너 4: 시스템 컨트롤 ---
+    st.markdown('<div class="banner-card" style="border-left-color: #FF4B4B;"><div class="banner-title" style="color: #FF4B4B;">⚙️ [BANNER 04] SYSTEM CONTROL</div>', unsafe_allow_html=True)
+    new_input = st.text_area("감시 종목 수정", value=watchlist_str, height=100)
+    
+    btn_col1, btn_col2 = st.columns(2)
+    with btn_col1:
+        if st.button("💾 SAVE SETTINGS"):
+            supabase.table('user_config').upsert({"id": 1, "watchlist": new_input}).execute()
+            st.success("SAVED")
+            st.rerun()
+    with btn_col2:
+        if st.button("🔔 TEST ALARM"):
+            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🔔 NSD PRO 연결 확인!"})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# 하단 푸터
+st.markdown("---")
+st.caption(f"SERVER STATUS: OPERATIONAL | UTC: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
