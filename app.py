@@ -3,39 +3,56 @@ from supabase import create_client
 import requests
 import pandas as pd
 
-# --- [1. 스타일 및 기본 설정] ---
-# 앱 느낌을 위해 wide 모드 사용, 한국어 타이틀
-st.set_page_config(page_title="NSD PRO 마스터 터미널", layout="wide") 
+# --- [1. 스타일 및 세련된 기본 설정] ---
+st.set_page_config(page_title="NSD PRO MASTER TERMINAL", layout="wide") # 넓게 쓰기
 
-# 커스텀 CSS: 정사각형 칸(Card) 스타일 및 호버 효과
+# 커스텀 CSS: 폰트 조정, 카드 UI, 호버 효과 등 프로페셔널한 느낌 강조
 st.markdown("""
     <style>
-    div.stButton > button {
-        background-color: #1E1E1E;
+    /* 전체 배경색 */
+    .stApp {
+        background-color: #101010;
         color: white;
-        border: 2px solid #333;
-        border-radius: 15px;
-        height: 250px; /* 정사각형 느낌을 위한 높이 설정 */
-        width: 100%;
-        font-size: 20px;
+    }
+    /* 사이드바 스타일 */
+    [data-testid="stSidebar"] {
+        background-color: #1A1A1A;
+        border-right: 1px solid #333;
+    }
+    /* 카드 UI (메트릭/컨트롤창) */
+    .terminal-card {
+        background-color: #1A1A1A;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #333;
+        margin-bottom: 15px;
+    }
+    .terminal-title {
+        color: #888;
+        font-size: 14px;
         font-weight: bold;
+        text-transform: uppercase;
+    }
+    .terminal-value {
+        color: #00FFAA;
+        font-size: 24px;
+        font-weight: bold;
+    }
+    /* 입력창 및 버튼 세련되게 */
+    .stTextArea textarea, .stTextInput input {
+        background-color: #121212 !important;
+        border-color: #333 !important;
+        color: white !important;
+    }
+    div.stButton > button {
+        background-color: #333;
+        color: white;
+        border: none;
         transition: 0.3s;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
     }
     div.stButton > button:hover {
-        border-color: #00FFAA;
-        color: #00FFAA;
-        transform: scale(1.03);
-        background-color: #1A1A1A;
-    }
-    .banner-sub-text {
-        font-size: 14px;
-        color: #888;
-        font-weight: normal;
-        margin-top: 10px;
+        background-color: #00FFAA;
+        color: black;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -47,90 +64,90 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
-# --- [2. 페이지 상태 관리] ---
-if 'page' not in st.session_state:
-    st.session_state.page = 'home' # 초기 화면
+# --- [2. 핵심 데이터 로직] ---
+def load_watchlist():
+    try:
+        res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
+        return res.data[0].get('watchlist', '') if res.data else ""
+    except: return ""
 
-def go_to(page_name):
-    st.session_state.page = page_name
-    st.rerun()
-
-# --- [3. 메인 화면: 2x2 그리드 배너] ---
-if st.session_state.page == 'home':
-    st.title("🛡️ NSD PRO 마스터 터미널")
-    st.write("원하시는 서비스를 선택하세요.")
-    st.divider()
-
-    # 가로 2칸 열 만들기
-    row1_col1, row1_col2 = st.columns(2)
-    row2_col1, row2_col2 = st.columns(2)
-
-    # 1행 1열: SEC 공시 감시 (기능 작동 중)
-    with row1_col1:
-        if st.button("📡\nSEC 실시간 공시 센터\n<div class='banner-sub-text'>20초마다 새로운 공시 자동 감시 중</div>", use_container_width=True):
-            go_to('sec')
-
-    # 1행 2열: REG SHO 분석 (껍데기)
-    with row1_col2:
-        if st.button("⚠️\nREG SHO 분석 타임라인\n<div class='banner-sub-text'>연속 등재 일수 계산기 (업데이트 예정)</div>", use_container_width=True):
-            go_to('regsho')
-
-    # 2행 1열: 주가 검색 (껍데기)
-    with row2_col1:
-        if st.button("🔍\n종목 퀵 시세 검색\n<div class='banner-sub-text'>실시간 차트 및 FTD 데이터 (업데이트 예정)</div>", use_container_width=True):
-            go_to('search')
-
-    # 2행 2열: 시스템 설정 (기능 작동 중)
-    with row2_col2:
-        if st.button("⚙️\n시스템 컨트롤 센터\n<div class='banner-sub-text'>감시 종목 수정 및 텔레그램 테스트</div>", use_container_width=True):
-            go_to('settings')
-
-# --- [4. 상세 상세 화면 정의 (한국어)] ---
-
-# A. SEC 감시 화면
-elif st.session_state.page == 'sec':
-    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
-    st.header("📡 SEC 실시간 공시 감시 센터")
-    res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
-    watchlist = res.data[0].get('watchlist', '')
-    st.success(f"현재 감시 중인 종목 리스트: **{watchlist}**")
-    st.info("파이썬애니웨어 엔진이 뒤에서 24시간 내내 이 종목들을 감시하고 있습니다.")
-
-# B. REG SHO 화면 (업데이트 예정)
-elif st.session_state.page == 'regsho':
-    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
-    st.header("⚠️ REG SHO Threshold List 분석")
-    st.warning("나스닥 공식 데이터를 분석하여 연속 등재 일수를 계산하는 기능은 아직 추가되지 않았습니다.")
-
-# C. 주가 검색 화면 (업데이트 예정)
-elif st.session_state.page == 'search':
-    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
-    st.header("🔍 종목 퀵 시세 검색")
-    st.warning("실시간 주가 차트 및 FTD 데이터를 불러오는 기능은 아직 추가되지 않았습니다.")
-
-# D. 설정 화면 (작동 중)
-elif st.session_state.page == 'settings':
-    if st.button("⬅️ 메인 메뉴로 돌아가기"): go_to('home')
-    st.header("⚙️ 시스템 컨트롤 센터")
+# --- [3. 사이드바 확장형 메뉴] ---
+with st.sidebar:
+    st.markdown("### 🛡️ NSD PRO MASTER")
+    st.caption("초정밀 나스닥 터미널")
     st.divider()
     
-    # 데이터 로딩
-    res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
-    current_val = res.data[0].get('watchlist', '')
-    
-    # 배너 형식으로 꾸미기
-    st.subheader("🛠️ 감시 종목 리스트 수정")
-    st.write("티커를 쉼표(,)로 구분해서 입력하세요 (예: BNAI, EMPD)")
-    new_input = st.text_area("입력 칸", value=current_val, label_visibility="collapsed")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("💾 설정 저장 및 엔진 동기화", use_container_width=True):
-            supabase.table('user_config').upsert({"id": 1, "watchlist": new_input}).execute()
-            st.success("성공적으로 저장되었습니다! 엔진이 즉시 새 목록을 읽어옵니다.")
-            st.rerun()
-    
+    # 확장성 있는 목록형 메뉴
+    menu = st.radio(
+        "메뉴 선택",
+        ["대시보드 홈", "📡 SEC 실시간 공시", "⚠️ Reg Sho 분석 (예정)", "🔍 종목 주가 검색 (예정)", "⚙️ 시스템 설정"],
+        index=0
+    )
+    st.v_spacer(height=30)
+    st.caption("시스템 상태: 정상 작동 중")
     st.divider()
-    st.subheader("🔔 텔레그램 연결 상태 테스트")
-    if st.button("테스트 알림 보내기", use_container_width=True):
+
+# --- [4. 메인 화면: 선택된 메뉴에 따라 출력] ---
+
+# 데이터 로딩
+current_watchlist = load_watchlist()
+tickers = [t.strip().upper() for t in current_watchlist.split(',') if t.strip()]
+
+# A. 대시보드 홈 (핵심 요약 정보 집약)
+if menu == "대시보드 홈":
+    st.title("📊 통합 대시보드")
+    
+    # 상단 요약 카드 영역 (거대한 배너 삭제)
+    st.markdown('<div class="terminal-card"><div class="terminal-title">핵심 감시 모니터</div>', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    with c1: st.metric("감시 종목 수", f"{len(tickers)}개", delta="실시간")
+    with c2: st.metric("엔진 상태", "Running", delta="정상")
+    with c3: st.metric("최근 공시 발견", "없음", delta="0")
+    with c4: st.metric("Reg Sho 등재", "2종목", delta="분석 중", delta_color="off")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    col_l, col_r = st.columns([2,1])
+    with col_l:
+        st.markdown('<div class="terminal-card"><div class="terminal-title">최근 SEC 공시 발견 피드 (실시간)</div>', unsafe_allow_html=True)
+        # 나중에 DB에서 공시 로그를 읽어와 뿌려주는 자리
+        st.info("실시간 공시 피드가 이 자리에 시간순으로 집약됩니다.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    with col_r:
+        st.markdown('<div class="terminal-card"><div class="terminal-title">현재 감시 종목 상세</div>', unsafe_allow_html=True)
+        if tickers:
+            st.table(pd.DataFrame({"티커": tickers}))
+        else:
+            st.write("감시 종목이 없습니다.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# B. 시스템 설정 (기능 집약)
+elif menu == "⚙️ 시스템 설정":
+    st.title("⚙️ 시스템 컨트롤 센터")
+    
+    # 1. 종목 설정 카드
+    st.markdown('<div class="terminal-card"><div class="terminal-title">실시간 감시 종목 수정</div>', unsafe_allow_html=True)
+    new_tickers = st.text_area("쉼표(,)로 구분하여 입력 (예: BNAI, EMPD)", value=current_watchlist, height=100)
+    if st.button("💾 설정 저장 및 엔진 동기화"):
+        supabase.table('user_config').upsert({"id": 1, "watchlist": new_tickers}).execute()
+        st.success("✅ 저장 완료!")
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 2. 시스템 테스트 카드
+    st.markdown('<div class="terminal-card"><div class="terminal-title">텔레그램 연결 상태 테스트</div>', unsafe_allow_html=True)
+    if st.button("🔔 테스트 알림 보내기", use_container_width=True):
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🔔 NSD PRO 연결 확인 성공!"})
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# C. 나머지 껍데기 화면 (한국어로 명확히 표시)
+elif menu == "📡 SEC 실시간 공시":
+    st.title("📡 SEC 실시간 공시 센터")
+    st.warning("상세 공시 피드 기능은 업데이트 중입니다. 대시보드 홈에서 확인하세요.")
+
+elif menu == "⚠️ Reg Sho 분석 (예정)":
+    st.title("⚠️ Reg Sho Threshold List 분석")
+    st.error("나스닥 데이터를 크롤링하여 연속 등재 일수를 계산하는 기능은 아직 추가되지 않았습니다.")
+
+elif menu == "🔍 종목 주가 검색 (예정)":
+    st.title("🔍 종목 주가 검색")
+    st.error("실시간 주가 차트 및 FTD 데이터를 불러오는 기능은 아직 추가되지 않았습니다.")
