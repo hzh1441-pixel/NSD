@@ -1,98 +1,113 @@
 import streamlit as st
 from supabase import create_client
-import pandas as pd
 import requests
+import pandas as pd
 
-# --- [1. 스타일 및 설정] ---
-st.set_page_config(page_title="NSD PRO MASTER", layout="wide")
+# --- [1. 기본 설정 및 디자인] ---
+st.set_page_config(page_title="NSD PRO PORTAL", layout="centered") # 앱 느낌을 위해 가운데 정렬
 
-# 배너 스타일을 위한 커스텀 CSS
+# 배너 스타일링 CSS
 st.markdown("""
     <style>
-    .banner-card {
-        background-color: #1E1E1E;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #00FFAA;
-        margin-bottom: 20px;
+    .main-banner {
+        background: linear-gradient(90deg, #121212 0%, #1e1e1e 100%);
+        padding: 40px;
+        border-radius: 15px;
+        border: 1px solid #333;
+        margin-bottom: 15px;
+        cursor: pointer;
+        transition: 0.3s;
+        text-align: center;
     }
-    .banner-title {
+    .main-banner:hover {
+        border-color: #00FFAA;
+        transform: scale(1.02);
+    }
+    .banner-text {
         color: #00FFAA;
-        font-size: 20px;
+        font-size: 24px;
         font-weight: bold;
-        margin-bottom: 10px;
+    }
+    .sub-text {
+        color: #888;
+        font-size: 14px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# DB 연결
+# DB 및 텔레그램 설정 (기존 데이터 유지)
 SUPABASE_URL = "https://rqpazefumujrwbddymly.supabase.co"
 SUPABASE_KEY = "sb_publishable_dwWER9BMd3z_zq_m5JevEA_A-rUqZFz"
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 TOKEN = "8306599736:AAHwT_jhT9DHJqdWubOQoL1JuNlBbMjswGw"
 CHAT_ID = "8182795005"
 
-# --- [2. 핵심 로직] ---
-def load_data():
+# --- [2. 페이지 관리 로직] ---
+if 'page' not in st.session_state:
+    st.session_state.page = 'home' # 기본값은 홈 화면
+
+def go_to(page_name):
+    st.session_state.page = page_name
+    st.rerun()
+
+# --- [3. 각 화면 정의] ---
+
+# A. 홈 화면 (배너 나열)
+if st.session_state.page == 'home':
+    st.title("🛡️ NSD PRO MASTER")
+    st.write("진입하고 싶은 서비스를 선택하세요.")
+    
+    # 배너 1: SEC 공시
+    if st.button("📡 [BANNER 01] SEC REAL-TIME FILINGS", use_container_width=True):
+        go_to('sec')
+    
+    # 배너 2: REG SHO
+    if st.button("⚠️ [BANNER 02] REG SHO THRESHOLD LIST", use_container_width=True):
+        go_to('regsho')
+        
+    # 배너 3: 주가 검색
+    if st.button("🔍 [BANNER 03] TICKER QUICK SEARCH", use_container_width=True):
+        go_to('search')
+        
+    # 배너 4: 설정
+    if st.button("⚙️ [BANNER 04] SYSTEM SETTINGS", use_container_width=True):
+        go_to('settings')
+
+# B. SEC 감시 화면
+elif st.session_state.page == 'sec':
+    if st.button("⬅️ BACK TO MENU"): go_to('home')
+    st.header("📡 SEC 실시간 감시 센터")
     res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
-    return res.data[0].get('watchlist', '') if res.data else ""
+    watchlist = res.data[0].get('watchlist', '')
+    st.success(f"현재 감시 중인 종목: **{watchlist}**")
+    st.info("파이썬애니웨어 엔진이 20초마다 새 공시를 체크하고 있습니다.")
 
-# --- [3. 메인 배너 레이아웃] ---
+# C. REG SHO 화면
+elif st.session_state.page == 'regsho':
+    if st.button("⬅️ BACK TO MENU"): go_to('home')
+    st.header("⚠️ REG SHO 분석")
+    st.warning("나스닥 공식 리스트 대조 기능 업데이트 중...")
+    st.write("BNAI: 등재 유지 중 (예시 데이터)")
 
-# 메인 타이틀
-st.title("🛡️ NSD PRO : REAL-TIME TERMINAL")
-st.divider()
+# D. 주가 검색 화면
+elif st.session_state.page == 'search':
+    if st.button("⬅️ BACK TO MENU"): go_to('home')
+    st.header("🔍 종목 퀵 서치")
+    ticker = st.text_input("조회할 티커 입력").upper()
+    if ticker:
+        st.write(f"**{ticker}**의 차트 및 FTD 데이터를 불러옵니다.")
 
-# 좌측/우측 정밀 배너 배치
-left_col, right_col = st.columns([2, 1])
-
-with left_col:
-    # --- 배너 1: SEC 공시 모니터링 ---
-    st.markdown('<div class="banner-card"><div class="banner-title">📡 [BANNER 01] SEC REAL-TIME MONITORING</div>', unsafe_allow_html=True)
-    watchlist_str = load_data()
-    tickers = [t.strip().upper() for t in watchlist_str.split(',') if t.strip()]
+# E. 설정 화면
+elif st.session_state.page == 'settings':
+    if st.button("⬅️ BACK TO MENU"): go_to('home')
+    st.header("⚙️ 시스템 설정")
+    res = supabase.table('user_config').select('watchlist').eq('id', 1).execute()
+    current_val = res.data[0].get('watchlist', '')
     
-    c1, c2, c3 = st.columns(3)
-    for i, t in enumerate(tickers[:3]): # 상위 3개 종목 요약 표시
-        with [c1, c2, c3][i]:
-            st.metric(label=f"TARGET", value=t, delta="ACTIVE")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- 배너 2: REG SHO 추적기 ---
-    st.markdown('<div class="banner-card"><div class="banner-title">⚠️ [BANNER 02] REG SHO THRESHOLD TRACKER</div>', unsafe_allow_html=True)
-    # 실제 데이터 연동 전 시각화 예시
-    reg_data = pd.DataFrame({
-        "Ticker": tickers if tickers else ["-"],
-        "Status": ["ON LIST" if "BNAI" in t or "EMPD" in t else "CLEAN" for t in (tickers if tickers else ["-"])],
-        "Consecutive Days": ["8 Days" if "BNAI" in t else "-" for t in (tickers if tickers else ["-"])]
-    })
-    st.table(reg_data)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-with right_col:
-    # --- 배너 3: 종목 시세 검색 ---
-    st.markdown('<div class="banner-card" style="border-left-color: #FFCC00;"><div class="banner-title" style="color: #FFCC00;">🔍 [BANNER 03] QUICK PRICE SEARCH</div>', unsafe_allow_html=True)
-    search_q = st.text_input("티커 입력 (예: AAPL)", "").upper()
-    if search_q:
-        st.write(f"**{search_q}** 시세 데이터 연결 중...")
-        st.info("Yahoo Finance API 연동 시 실시간 차트가 이곳에 표시됩니다.")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # --- 배너 4: 시스템 컨트롤 ---
-    st.markdown('<div class="banner-card" style="border-left-color: #FF4B4B;"><div class="banner-title" style="color: #FF4B4B;">⚙️ [BANNER 04] SYSTEM CONTROL</div>', unsafe_allow_html=True)
-    new_input = st.text_area("감시 종목 수정", value=watchlist_str, height=100)
+    new_input = st.text_area("감시 종목 수정 (쉼표 구분)", value=current_val)
+    if st.button("💾 SAVE & SYNC"):
+        supabase.table('user_config').upsert({"id": 1, "watchlist": new_input}).execute()
+        st.success("저장 완료!")
     
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        if st.button("💾 SAVE SETTINGS"):
-            supabase.table('user_config').upsert({"id": 1, "watchlist": new_input}).execute()
-            st.success("SAVED")
-            st.rerun()
-    with btn_col2:
-        if st.button("🔔 TEST ALARM"):
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🔔 NSD PRO 연결 확인!"})
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# 하단 푸터
-st.markdown("---")
-st.caption(f"SERVER STATUS: OPERATIONAL | UTC: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if st.button("🔔 TEST TELEGRAM"):
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": "🔔 연결 확인!"})
